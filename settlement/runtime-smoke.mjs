@@ -1,5 +1,6 @@
 import { generateKeyPairSync, sign } from "node:crypto";
 import { mkdtemp, rm } from "node:fs/promises";
+import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { spawn } from "node:child_process";
@@ -7,9 +8,26 @@ import { spawn } from "node:child_process";
 import { decodeBase58, encodeBase58 } from "../server/wallet-auth.js";
 
 const PROGRAM_ID = "14dia6Spfd6qu6Q36caisExYQsLA9si4PqFpqfiQ8Z9S";
-const RPC_PORT = Number(process.env.XPOKER_SMOKE_RPC_PORT ?? 18899);
-const FAUCET_PORT = Number(process.env.XPOKER_SMOKE_FAUCET_PORT ?? 19900);
+const RPC_PORT = Number(process.env.XPOKER_SMOKE_RPC_PORT ?? await availablePort());
+// Port zero asks the OS for a free faucet port. The smoke test funds its payer
+// at genesis, so it never needs to discover or call that port.
+const FAUCET_PORT = Number(process.env.XPOKER_SMOKE_FAUCET_PORT ?? 0);
 const RPC_URL = `http://127.0.0.1:${RPC_PORT}`;
+
+async function availablePort() {
+  return new Promise((resolve, reject) => {
+    const server = createServer();
+    server.unref();
+    server.once("error", reject);
+    server.listen(0, "127.0.0.1", () => {
+      const address = server.address();
+      server.close((error) => {
+        if (error) reject(error);
+        else resolve(address.port);
+      });
+    });
+  });
+}
 
 function shortvec(value) {
   const bytes = [];
@@ -34,7 +52,7 @@ async function rpc(method, params = []) {
   return payload.result;
 }
 
-async function eventually(check, label, timeoutMs = 30_000) {
+async function eventually(check, label, timeoutMs = 90_000, child) {
   const deadline = Date.now() + timeoutMs;
   let lastError;
   while (Date.now() < deadline) {
@@ -43,6 +61,9 @@ async function eventually(check, label, timeoutMs = 30_000) {
       if (result) return result;
     } catch (error) {
       lastError = error;
+    }
+    if (child && (child.exitCode !== null || child.signalCode !== null)) {
+      throw new Error(`${label} process exited before becoming ready`);
     }
     await new Promise((resolve) => setTimeout(resolve, 250));
   }
@@ -80,52 +101,65 @@ async function stop(child) {
     new Promise((resolve) => setTimeout(resolve, 3_000)),
   ]);
   if (child.exitCode === null && child.signalCode === null) child.kill("SIGKILL");
+  if (child.exitCode === null && child.signalCode === null) {
+    await new Promise((resolve) => child.once("exit", resolve));
+  }
 }
 
 const ledger = await mkdtemp(join(tmpdir(), "xpoker-validator-"));
 let validator;
 let validatorOutput = "";
 try {
+  // Do not rely on a developer or CI image having a Solana CLI wallet. The
+  // validator otherwise tries to resolve its default genesis mint from the
+  // local CLI config before RPC can start.
+  const { publicKey, privateKey } = generateKeyPairSync("ed25519");
+  const payerBytes = publicKey.export({ type: "spki", format: "der" }).subarray(-32);
+  const payerPublicKey = encodeBase58(payerBytes);
+
   validator = spawn("solana-test-validator", [
     "--reset",
     "--ledger", ledger,
+    "--mint", payerPublicKey,
     "--bpf-program", PROGRAM_ID, "target/deploy/xpoker_escrow.so",
     "--bind-address", "127.0.0.1",
     "--rpc-port", String(RPC_PORT),
     "--faucet-port", String(FAUCET_PORT),
-    "--quiet",
   ], { cwd: new URL(".", import.meta.url), stdio: ["ignore", "pipe", "pipe"] });
   validator.stdout.on("data", (chunk) => { validatorOutput += chunk; });
   validator.stderr.on("data", (chunk) => { validatorOutput += chunk; });
 
-  await eventually(async () => (await rpc("getHealth")) === "ok", "local validator");
+  await eventually(async () => (await rpc("getHealth")) === "ok", "local validator", 90_000, validator);
+  await eventually(async () => {
+    const account = await rpc("getAccountInfo", [PROGRAM_ID, { commitment: "processed" }]);
+    return account.value?.executable === true;
+  }, "escrow program deployment", 90_000, validator);
 
-  const { publicKey, privateKey } = generateKeyPairSync("ed25519");
-  const payerBytes = publicKey.export({ type: "spki", format: "der" }).subarray(-32);
-  const payerPublicKey = encodeBase58(payerBytes);
-  await rpc("requestAirdrop", [payerPublicKey, 1_000_000_000]);
   await eventually(async () => {
     const balance = await rpc("getBalance", [payerPublicKey, { commitment: "processed" }]);
     return balance.value > 0;
-  }, "payer airdrop");
+  }, "genesis payer balance");
 
-  const latest = await rpc("getLatestBlockhash", [{ commitment: "processed" }]);
-  const transaction = buildFallbackTransaction({
-    payerPublicKey,
-    privateKey,
-    recentBlockhash: latest.value.blockhash,
-  });
-  const simulation = await rpc("simulateTransaction", [transaction, {
-    encoding: "base64",
-    sigVerify: true,
-    commitment: "processed",
-  }]);
-  const logs = simulation.value.logs ?? [];
-  const invoked = logs.some((line) => line.includes(`Program ${PROGRAM_ID} invoke`));
-  const expectedFallback = logs.some((line) => line.includes("InstructionFallbackNotFound"));
-  if (!invoked || !expectedFallback) {
-    throw new Error(`Escrow entrypoint did not execute as expected: ${JSON.stringify({ err: simulation.value.err, logs })}`);
-  }
+  await eventually(async () => {
+    const latest = await rpc("getLatestBlockhash", [{ commitment: "processed" }]);
+    const transaction = buildFallbackTransaction({
+      payerPublicKey,
+      privateKey,
+      recentBlockhash: latest.value.blockhash,
+    });
+    const simulation = await rpc("simulateTransaction", [transaction, {
+      encoding: "base64",
+      sigVerify: true,
+      commitment: "processed",
+    }]);
+    const logs = simulation.value.logs ?? [];
+    const invoked = logs.some((line) => line.includes(`Program ${PROGRAM_ID} invoke`));
+    const expectedFallback = logs.some((line) => line.includes("InstructionFallbackNotFound"));
+    if (!invoked || !expectedFallback) {
+      throw new Error(`unexpected simulation: ${JSON.stringify({ err: simulation.value.err, logs })}`);
+    }
+    return true;
+  }, "escrow entrypoint execution", 90_000, validator);
 
   console.log("Escrow SBF entrypoint executed in a local validator; expected fallback error was observed.");
 } catch (error) {
@@ -135,4 +169,3 @@ try {
   if (validator) await stop(validator);
   await rm(ledger, { recursive: true, force: true });
 }
-
