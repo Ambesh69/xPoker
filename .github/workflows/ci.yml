@@ -59,6 +59,8 @@ jobs:
     container: solanafoundation/anchor:v1.0.0
     steps:
       - uses: actions/checkout@v4
+      - name: Configure pinned Rust toolchain
+        run: rustup toolchain install 1.97.1 --profile minimal --component rustfmt --component clippy && rustup default 1.97.1
       - name: Rust unit and cross-language vectors
         working-directory: settlement
         run: cargo test --workspace --locked
