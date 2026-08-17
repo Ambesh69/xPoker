@@ -2,6 +2,17 @@
 
 Status: zero-value multiplayer candidate. `REAL_VALUE_MODE` must remain disabled.
 
+## Live safe-beta deployment
+
+- Frontend: `https://xpoker.vercel.app`
+- Authoritative API/WebSocket origin: `https://xpoker-api-production.up.railway.app`
+- Runtime: Railway container with managed PostgreSQL and Redis on the project-private network
+- Schema: migrations `001_core.sql` through `004_safe_beta.sql` run as a pre-deploy release step
+- Health gate: `/health/ready` must confirm both authoritative dependencies before a deployment is promoted
+- Value boundary: `REAL_VALUE_MODE=disabled`; the release-status endpoint deliberately reports the unfulfilled real-value gates
+
+The browser is configured with the exact API origin. API CORS and WebSocket upgrades accept only `https://xpoker.vercel.app`.
+
 The safe beta exercises the production-shaped wallet, room, table, dealer, reconnect, and audit paths without accepting a deposit or creating a token transaction. xStock symbols are table denominations only. All stacks are non-withdrawable demo credits in two-decimal atomic units.
 
 ## Safety boundary
