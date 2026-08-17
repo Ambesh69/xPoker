@@ -35,6 +35,7 @@ const state = {
   selectedRoom: FALLBACK_ROOMS[0], selectedAsset: FALLBACK_ASSETS[0], buyInAmount: 20, hostGame: "NLH",
   tableId: null, tableState: null, tableConnection: "offline", socket: null, reconnectTimer: null,
   reconnectAttempt: 0, holeKey: null, holeCards: [], lastEvent: null, pendingAfterConnect: null, audit: null,
+  leaveRequestId: null,
 };
 
 function escapeHtml(value) { return String(value ?? "").replace(/[&<>'"]/g, (character) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "'": "&#39;", '"': "&quot;" })[character]); }
@@ -189,8 +190,8 @@ function actionDock() {
 }
 
 function tableView() {
-  const room = state.selectedRoom; const table = state.tableState || previewTableState(); const hand = table.currentHand; const board = hand?.publicReveals?.map((reveal) => reveal.card.code) || []; const potAtomic = hand?.betting?.players?.reduce((sum, player) => sum + Number(player.contributed), 0) || 0; const tableMessage = table.status === "WAITING" ? `${table.seats.length}/${table.rules.seats} seated · waiting for a second player` : hand?.turn ? `Action is on ${shortWallet(hand.turn.playerId)}` : "Dealer is resolving the hand";
-  return `<main class="table-page"><header class="table-bar"><div class="table-title"><button class="icon-btn" data-action="go-lobby" aria-label="Back to tables">←</button><div><h1>${escapeHtml(room.name)}</h1><span>${gameLabel(hand?.game || room.game)} · ${moneyAtomic(room.rules.smallBlindAtomic)} / ${moneyAtomic(room.rules.bigBlindAtomic)}</span></div></div><div class="table-meta"><span class="tag">Hand #${table.handNumber}</span><span class="tag">Seq ${table.version}</span><span class="tag">${state.selectedAsset.symbol} demo</span><span class="status-pill"><i class="market-dot"></i>No funds</span></div></header><section class="poker-stage"><div class="table-toast">${escapeHtml(tableMessage)}</div>${fairnessRail()}<div class="table-wrap"><div class="poker-table"><div class="pot-center"><span class="utility-label">Demo pot</span><strong>${moneyAtomic(potAtomic)} · ${state.selectedAsset.symbol}</strong><div class="board-cards">${Array.from({ length: 5 }, (_, index) => board[index] ? cardHtml(board[index]) : cardHtml("?", "face-down")).join("")}</div></div></div>${Array.from({ length: Math.min(table.rules.seats, 6) }, (_, index) => tableSeat(index + 1)).join("")}</div>${actionDock()}</section></main>`;
+  const room = state.selectedRoom; const table = state.tableState || previewTableState(); const hand = table.currentHand; const board = hand?.publicReveals?.map((reveal) => reveal.card.code) || []; const potAtomic = hand?.betting?.players?.reduce((sum, player) => sum + Number(player.contributed), 0) || 0; const tableMessage = table.status === "WAITING" ? table.seats.length < 2 ? `${table.seats.length}/${table.rules.seats} seated · waiting for a second player` : `${table.seats.length}/${table.rules.seats} seated · dealer preparing the next fair hand` : hand?.turn ? `Action is on ${shortWallet(hand.turn.playerId)}` : "Dealer is resolving the hand";
+  return `<main class="table-page"><header class="table-bar"><div class="table-title"><button class="icon-btn" data-action="leave-table" aria-label="Leave table">←</button><div><h1>${escapeHtml(room.name)}</h1><span>${gameLabel(hand?.game || room.game)} · ${moneyAtomic(room.rules.smallBlindAtomic)} / ${moneyAtomic(room.rules.bigBlindAtomic)}</span></div></div><div class="table-meta"><span class="tag">Hand #${table.handNumber}</span><span class="tag">Seq ${table.version}</span><span class="tag">${state.selectedAsset.symbol} demo</span><span class="status-pill"><i class="market-dot"></i>No funds</span></div></header><section class="poker-stage"><div class="table-toast">${escapeHtml(tableMessage)}</div>${fairnessRail()}<div class="table-wrap"><div class="poker-table"><div class="pot-center"><span class="utility-label">Demo pot</span><strong>${moneyAtomic(potAtomic)} · ${state.selectedAsset.symbol}</strong><div class="board-cards">${Array.from({ length: 5 }, (_, index) => board[index] ? cardHtml(board[index]) : cardHtml("?", "face-down")).join("")}</div></div></div>${Array.from({ length: Math.min(table.rules.seats, 6) }, (_, index) => tableSeat(index + 1)).join("")}</div>${actionDock()}</section></main>`;
 }
 
 function render() { document.querySelector("#app").innerHTML = state.loading ? `<div class="app-loading"><span class="brand-mark">xP</span><strong>Opening the safe floor…</strong></div>` : state.view === "table" ? tableView() : lobbyView(); bindEvents(); }
@@ -205,7 +206,12 @@ function connectRealtime() {
   socket.addEventListener("message", async (event) => {
     let message; try { message = JSON.parse(event.data); } catch { return; }
     if (message.type === "authenticated") { state.tableConnection = "live"; state.reconnectAttempt = 0; sendRealtime({ type: "subscribe", requestId: requestId("sub"), tableId: state.tableId, afterVersion: state.tableState?.version || 0 }); await beginHoleKeyExchange(); render(); }
-    if (message.type === "table_snapshot" || message.type === "command_result") { state.tableState = message.state; render(); }
+    if (message.type === "table_snapshot") { state.tableState = message.state; render(); }
+    if (message.type === "command_result") {
+      state.tableState = message.state;
+      if (message.requestId === state.leaveRequestId) { await completeTableLeave(); return; }
+      render();
+    }
     if (message.type === "table_event") { state.lastEvent = message.event; sendRealtime({ type: "subscribe", requestId: requestId("sync"), tableId: state.tableId, afterVersion: state.tableState?.version || 0 }); }
     if (message.type === "hole_card_key_established") await completeHoleKeyExchange(message.serverPublicKey);
     if (message.type === "hole_cards") { try { const payload = await decryptHoleCards(message.envelope); state.holeCards = payload.reveals; render(); } catch { toast("Private cards could not be decrypted. Reconnecting safely."); socket.close(4400, "private deal decrypt failed"); } }
@@ -227,6 +233,13 @@ async function completeHoleKeyExchange(serverPublicKey) { const serverKey = awai
 async function decryptHoleCards(envelope) { if (!state.holeKey?.aesKey) throw new Error("Private-card key is unavailable"); const { iv, ciphertext, tag, ...aad } = envelope; const cipher = base64UrlToBytes(ciphertext); const authTag = base64UrlToBytes(tag); const combined = new Uint8Array(cipher.length + authTag.length); combined.set(cipher); combined.set(authTag, cipher.length); const plaintext = await crypto.subtle.decrypt({ name: "AES-GCM", iv: base64UrlToBytes(iv), additionalData: new TextEncoder().encode(canonicalJson(aad)), tagLength: 128 }, state.holeKey.aesKey, combined); return JSON.parse(new TextDecoder().decode(plaintext)); }
 
 function tableAction(type) { const hand = state.tableState?.currentHand; if (!hand?.legalActions) return; const action = { type }; if (type === "raise" || type === "bet") action.to = document.querySelector("#bet-range").value; sendRealtime({ type: "command", command: "act", requestId: requestId("act"), tableId: state.tableId, expectedVersion: state.tableState.version, expectedBettingVersion: hand.betting.version, idempotencyKey: requestId("idem"), action }); }
+async function completeTableLeave() { state.leaveRequestId = null; state.socket?.close(1000, "left table"); state.tableId = null; state.tableState = null; state.holeCards = []; state.lastEvent = null; state.view = "lobby"; await loadLobby({ quiet: true }); toast("Demo seat released. No funds moved."); }
+function leaveTable() {
+  if (!state.tableId || state.tableId === "interface-preview" || state.tableConnection !== "live") { completeTableLeave(); return; }
+  if (state.leaveRequestId) return;
+  const id = requestId("leave"); state.leaveRequestId = id;
+  if (!sendRealtime({ type: "command", command: "leave", requestId: id, tableId: state.tableId, expectedVersion: state.tableState.version, idempotencyKey: requestId("idem") })) state.leaveRequestId = null;
+}
 async function logout() { try { if (state.token && state.backend === "online") await api("/v1/auth/logout", { method: "POST", authenticated: true, body: {} }); } catch {} sessionStorage.removeItem(SESSION_KEY); state.token = null; state.profile = null; state.socket?.close(1000, "logout"); closeModal(); await loadLobby({ quiet: true }); toast("Beta session ended."); }
 async function viewAudit(handId) {
   if (state.backend !== "online") { toast("A completed authoritative hand is required for an audit."); return; }
@@ -255,6 +268,7 @@ function handleAction(event) {
   const target = event.currentTarget; const action = target.dataset.action;
   if (action === "close-modal") { if (!target.classList.contains("modal-overlay") || event.target === target) closeModal(); }
   if (action === "go-lobby") { event.preventDefault(); state.socket?.close(1000, "left table view"); state.view = "lobby"; closeModal(); loadLobby({ quiet: true }); }
+  if (action === "leave-table") { event.preventDefault(); leaveTable(); }
   if (action === "open-wallet") walletModal(); if (action === "connect-provider") connectProvider(target); if (action === "guest-session") createGuestSession(); if (action === "preview-session") createPreviewSession(); if (action === "logout") logout();
   if (action === "open-host") hostModal(); if (action === "open-invite") inviteModal(); if (action === "join-code") joinInvite();
   if (action === "focus-bankroll") document.querySelector("#bankroll")?.scrollIntoView({ behavior: "smooth", block: "center" });
