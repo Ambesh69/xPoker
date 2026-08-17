@@ -1,5 +1,5 @@
 import { generateKeyPairSync, sign } from "node:crypto";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -9,12 +9,14 @@ import { decodeBase58, encodeBase58 } from "../server/wallet-auth.js";
 
 const PROGRAM_ID = "14dia6Spfd6qu6Q36caisExYQsLA9si4PqFpqfiQ8Z9S";
 const RPC_PORT = Number(process.env.XPOKER_SMOKE_RPC_PORT ?? await availablePort());
-// Port zero asks the OS for a free faucet port. The smoke test funds its payer
-// at genesis, so it never needs to discover or call that port.
-const FAUCET_PORT = Number(process.env.XPOKER_SMOKE_FAUCET_PORT ?? 0);
+// The faucet is unused because the payer is funded at genesis, but older
+// validator releases still require a non-zero bindable port.
+const FAUCET_PORT = Number(
+  process.env.XPOKER_SMOKE_FAUCET_PORT ?? await availablePort(new Set([RPC_PORT, RPC_PORT + 1])),
+);
 const RPC_URL = `http://127.0.0.1:${RPC_PORT}`;
 
-async function availablePort() {
+async function availablePort(excluded = new Set()) {
   return new Promise((resolve, reject) => {
     const server = createServer();
     server.unref();
@@ -23,6 +25,7 @@ async function availablePort() {
       const address = server.address();
       server.close((error) => {
         if (error) reject(error);
+        else if (excluded.has(address.port)) resolve(availablePort(excluded));
         else resolve(address.port);
       });
     });
@@ -163,7 +166,9 @@ try {
 
   console.log("Escrow SBF entrypoint executed in a local validator; expected fallback error was observed.");
 } catch (error) {
-  if (validatorOutput) console.error(validatorOutput.trim());
+  const validatorLog = await readFile(join(ledger, "validator.log"), "utf8").catch(() => "");
+  const diagnostics = [validatorOutput, validatorLog].filter(Boolean).join("\n").trim();
+  if (diagnostics) console.error(diagnostics);
   throw error;
 } finally {
   if (validator) await stop(validator);
