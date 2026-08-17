@@ -1,0 +1,23 @@
+[toolchain]
+anchor_version = "1.0.0"
+
+[features]
+resolution = true
+skip-lint = false
+
+[programs.localnet]
+xpoker_escrow = "14dia6Spfd6qu6Q36caisExYQsLA9si4PqFpqfiQ8Z9S"
+
+[programs.devnet]
+xpoker_escrow = "14dia6Spfd6qu6Q36caisExYQsLA9si4PqFpqfiQ8Z9S"
+
+[registry]
+url = "https://api.apr.dev"
+
+[provider]
+cluster = "Localnet"
+wallet = "~/.config/solana/id.json"
+
+[scripts]
+test = "node tests/merkle-vectors.mjs"
+

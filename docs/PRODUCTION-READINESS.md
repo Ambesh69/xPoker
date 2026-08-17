@@ -63,6 +63,24 @@ The Vercel deployment remains appropriate for static UI delivery. It is not the 
 - Settlement intents are idempotent and chain signatures are unique.
 - Transactional outbox table supports reliable event publication.
 
+### Poker rules core
+
+- Deterministic NLH and PLO4 betting with heads-up/multiway order, antes, a live straddle, timeouts and optimistic versions.
+- Full/short all-in raise behavior, PLO pot-limit maxima and automatic runouts.
+- NLH best-five and PLO exactly-two/exactly-three showdown evaluation.
+- Side pots, unmatched refunds, one/two-board splits, deterministic odd chips, capped rake and no-flop-no-drop.
+- Atomic-unit conservation assertions at pot, rake and payout boundaries.
+
+### Settlement candidate
+
+- Anchor Token Interface escrow with one canonical mint per table session.
+- Raw `u64` credited deposits, session locks, delayed Merkle settlement claims and replay-resistant claim PDAs.
+- Transcript-root anchoring, exact payout conservation, timeout refunds and two-step authority rotation.
+- Node/Rust cross-language settlement vector and local Solana SBF build/load verification.
+- Release gates pin the cluster, program address, SBF digest and upgrade authority.
+
+This candidate is local/devnet-only. It has not been independently audited and its settlement authority remains trusted.
+
 ### Release safety
 
 - `REAL_VALUE_MODE` defaults to disabled.
@@ -82,8 +100,8 @@ Prices are never used past a configured freshness limit. RFQ authorizations are 
 
 The following are deliberately not represented as complete:
 
-1. A fully tested poker rules engine covering betting rounds, all-ins, side pots, PLO “exactly two from hand,” split pots, rake caps, timeouts, reconnects, sit-out behavior and every room option.
-2. An audited Solana escrow/settlement program and audited upgrade/governance controls.
+1. Durable/realtime integration of the tested poker core, including reconnect leases, sit-out/return, time-bank consumption, ROE scheduling, recovery replay, encrypted hole-card delivery and randomized/property testing.
+2. Independent audit of the Solana escrow program plus an audited multisig/attestation, dispute watcher and upgrade/governance process.
 3. Production implementations for encrypted hole-card delivery and dealer key isolation/remote attestation.
 4. Frontend integration with Wallet Standard and the production API/realtime service.
 5. xStocks integrator credentials and atomic RFQ integration.

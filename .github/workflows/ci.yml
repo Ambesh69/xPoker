@@ -52,3 +52,24 @@ jobs:
       - run: npm ci
       - run: npm test
       - run: npm run audit
+
+  contract:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    container: solanafoundation/anchor:v1.0.0
+    steps:
+      - uses: actions/checkout@v4
+      - name: Rust unit and cross-language vectors
+        working-directory: settlement
+        run: cargo test --workspace --locked
+      - name: Rust security lint
+        working-directory: settlement
+        run: cargo clippy --workspace --all-targets --locked -- -D warnings
+      - name: Build deployable Solana SBF artifact
+        working-directory: settlement
+        run: anchor build --ignore-keys
+      - name: Execute SBF entrypoint in a local validator
+        run: npm run smoke:contract-runtime
+      - name: Report pinned artifact digest
+        working-directory: settlement
+        run: sha256sum target/deploy/xpoker_escrow.so

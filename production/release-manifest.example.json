@@ -1,6 +1,12 @@
 {
   "version": "xpoker-release/v1",
   "buildCommit": "0000000000000000000000000000000000000000",
+  "settlementProgram": {
+    "cluster": "mainnet-beta",
+    "programId": "",
+    "binarySha256": "",
+    "upgradeAuthority": ""
+  },
   "evidence": {
     "applicationSecurityAudit": {
       "status": "pending",

@@ -1,6 +1,7 @@
 import { createPublicKey, verify } from "node:crypto";
 
 import { canonicalJson } from "../fairness/protocol.js";
+import { decodeBase58, encodeBase58 } from "./wallet-auth.js";
 
 const HEX_32 = /^[0-9a-f]{64}$/i;
 
@@ -33,12 +34,25 @@ function manifestSignaturePassed(manifest, publicKeyPem) {
   }
 }
 
+function isSolanaPublicKey(value) {
+  try {
+    const bytes = decodeBase58(value);
+    return bytes.length === 32 && encodeBase58(bytes) === value;
+  } catch {
+    return false;
+  }
+}
+
 export function evaluateReleaseGates({ config, manifest, now = new Date() }) {
   const checks = [
     ["postgres_tls", config.databaseUrl?.startsWith("postgres") && /sslmode=(require|verify-full)/.test(config.databaseUrl)],
     ["redis_tls", config.redisUrl?.startsWith("rediss://")],
     ["dealer_key_isolated", config.dealerKeyProvider === "aws-kms" || config.dealerKeyProvider === "vault"],
     ["solana_rpc_tls", config.solanaRpcUrl?.startsWith("https://")],
+    ["settlement_mainnet", config.settlementCluster === "mainnet-beta"],
+    ["settlement_program_configured", isSolanaPublicKey(config.settlementProgramId)],
+    ["settlement_binary_pinned", HEX_32.test(config.settlementProgramBinarySha256 ?? "")],
+    ["settlement_upgrade_authority", config.settlementUpgradeAuthority === "immutable" || isSolanaPublicKey(config.settlementUpgradeAuthority)],
     ["strict_origins", config.allowedOrigins.length > 0 && config.allowedOrigins.every((origin) => origin.startsWith("https://"))],
     ["geofencing_configured", Boolean(config.geofencingProvider)],
     ["identity_controls_configured", Boolean(config.identityProvider)],
@@ -46,6 +60,10 @@ export function evaluateReleaseGates({ config, manifest, now = new Date() }) {
     ["asset_allowlist_versioned", /^[a-z0-9][a-z0-9._-]{7,127}$/i.test(config.assetAllowlistVersion ?? "")],
     ["release_manifest_version", manifest?.version === "xpoker-release/v1"],
     ["release_matches_build", manifest?.buildCommit === config.buildCommit && /^[0-9a-f]{40}$/i.test(config.buildCommit ?? "")],
+    ["release_matches_settlement", manifest?.settlementProgram?.cluster === config.settlementCluster
+      && manifest?.settlementProgram?.programId === config.settlementProgramId
+      && manifest?.settlementProgram?.binarySha256 === config.settlementProgramBinarySha256
+      && manifest?.settlementProgram?.upgradeAuthority === config.settlementUpgradeAuthority],
     ["release_manifest_signature", manifestSignaturePassed(manifest, config.releaseAuthorityPublicKeyPem)],
     ["application_security_audit", evidencePassed(manifest?.evidence?.applicationSecurityAudit, now)],
     ["cryptography_audit", evidencePassed(manifest?.evidence?.cryptographyAudit, now)],

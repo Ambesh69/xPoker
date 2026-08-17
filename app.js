@@ -199,6 +199,7 @@ function lobbyView() {
 
 function tableView() {
   const room = state.selectedRoom;
+  const tableAsset = state.selectedAsset.symbol;
   return `
     <main class="table-page">
       <header class="table-bar">
@@ -206,20 +207,20 @@ function tableView() {
           <button class="icon-btn" data-action="go-lobby" aria-label="Back to tables">←</button>
           <div><h1>${room.name}</h1><span>${room.game === "ROE" ? "Round of each · NLH now" : room.game} · ${room.blinds}</span></div>
         </div>
-        <div class="table-meta"><span class="tag">Hand #1842</span><span class="tag">${room.rake}</span><button class="btn btn-small" data-action="open-buy">＋ xStocks</button></div>
+        <div class="table-meta"><span class="tag">Hand #1842</span><span class="tag">${room.rake}</span><span class="tag">${tableAsset} table</span><button class="btn btn-small" data-action="open-buy">＋ ${tableAsset}</button></div>
       </header>
       <section class="poker-stage">
         <div class="table-toast">${room.game === "ROE" ? "PLO 4 begins after this orbit" : "Action is on RiverLi"}</div>
         <div class="table-wrap">
           <div class="poker-table">
-            <div class="pot-center"><span class="utility-label">Pot</span><strong>$7.20 · AAPLx</strong><div class="board-cards"><span class="card">2♠</span><span class="card">6♠</span><span class="card">2♣</span><span class="card red">Q♥</span><span class="card face-down">?</span></div></div>
+            <div class="pot-center"><span class="utility-label">Pot</span><strong>$7.20 · ${tableAsset}</strong><div class="board-cards"><span class="card">2♠</span><span class="card">6♠</span><span class="card">2♣</span><span class="card red">Q♥</span><span class="card face-down">?</span></div></div>
           </div>
-          <div class="seat seat-1"><span class="player-avatar" style="--avatar-color:#ffd9a2">AK<span class="dealer-chip">D</span></span><span class="player-name">antking</span><span class="player-stack">$84.30 · NVDAx</span></div>
-          <div class="seat seat-2"><span class="player-avatar" style="--avatar-color:#ccecff">RZ</span><span class="player-name">riz</span><span class="player-stack">$61.10 · SPYx</span></div>
-          <div class="seat seat-3"><span class="player-avatar" style="--avatar-color:#ffc7c5">ML</span><span class="player-name">mellow</span><span class="player-stack">$104.82 · TSLAx</span></div>
+          <div class="seat seat-1"><span class="player-avatar" style="--avatar-color:#ffd9a2">AK<span class="dealer-chip">D</span></span><span class="player-name">antking</span><span class="player-stack">$84.30 · ${tableAsset}</span></div>
+          <div class="seat seat-2"><span class="player-avatar" style="--avatar-color:#ccecff">RZ</span><span class="player-name">riz</span><span class="player-stack">$61.10 · ${tableAsset}</span></div>
+          <div class="seat seat-3"><span class="player-avatar" style="--avatar-color:#ffc7c5">ML</span><span class="player-name">mellow</span><span class="player-stack">$104.82 · ${tableAsset}</span></div>
           <div class="seat seat-4"><span class="hero-cards"><span class="card red">A♦</span><span class="card red">2♥</span></span><span class="player-avatar" style="--avatar-color:#ddd5ff">YOU</span><span class="player-name">${state.walletAddress}</span><span class="player-stack">${money(state.buyInAmount)} · ${state.selectedAsset.symbol}</span></div>
-          <div class="seat seat-5 active"><span class="player-avatar" style="--avatar-color:#d7ff86">RL</span><span class="player-name">RiverLi</span><span class="player-stack">$118.20 · AAPLx</span></div>
-          <div class="seat seat-6"><span class="player-avatar" style="--avatar-color:#dfe5e0">HW</span><span class="player-name">hours</span><span class="player-stack">$79.45 · QQQx</span></div>
+          <div class="seat seat-5 active"><span class="player-avatar" style="--avatar-color:#d7ff86">RL</span><span class="player-name">RiverLi</span><span class="player-stack">$118.20 · ${tableAsset}</span></div>
+          <div class="seat seat-6"><span class="player-avatar" style="--avatar-color:#dfe5e0">HW</span><span class="player-name">hours</span><span class="player-stack">$79.45 · ${tableAsset}</span></div>
           <span class="bet-chip bet-1">$2.20</span><span class="bet-chip bet-2">$2.20</span><span class="bet-chip bet-5">$2.80</span>
         </div>
         <div class="action-dock">
@@ -303,10 +304,10 @@ function buyinModal(room) {
     title: `Sit at ${room.name}`,
     description: `Dollar value locks when you take a seat. Min ${money(room.min)} · Max ${money(room.max)}.`,
     body: `
-      <div class="field"><span class="field-label">Choose buy-in asset</span>${assetPicker(asset.symbol)}</div>
+      <div class="field"><span class="field-label">Choose table asset</span>${assetPicker(asset.symbol)}</div>
       <div class="field" style="margin-top:18px"><span class="field-label">Buy-in value</span><input class="range" id="buyin-range" type="range" min="${room.min}" max="${room.max}" step="5" value="${state.buyInAmount}" aria-label="Buy-in amount" /><div class="quick-amounts"><button class="btn btn-small" data-action="set-buyin" data-value="${room.min}">Min ${money(room.min)}</button><button class="btn btn-small" data-action="set-buyin" data-value="${Math.round((room.min + room.max) / 2)}">Mid</button><button class="btn btn-small" data-action="set-buyin" data-value="${room.max}">Max ${money(room.max)}</button></div></div>
       <div class="buyin-summary"><span><span>Seat value</span><strong id="buyin-dollar">${money(state.buyInAmount)}</strong></span><span class="right"><span>You lock</span><strong id="buyin-token">${quantity} ${asset.symbol}</strong></span></div>
-      <p class="legal-note">At the table, stacks are shown in dollars. Settlement returns the same xStock quantity adjusted for net play, not the asset's later dollar price.</p>`,
+      <p class="legal-note">You join a table shard where every player uses ${asset.symbol}. Stacks are shown in dollars for readability; settlement returns the same xStock quantity adjusted for net play, not the asset's later dollar price.</p>`,
     footer: `<span class="balance-note">${state.walletConnected ? `${asset.balance.toFixed(3)} ${asset.symbol} in wallet` : "Wallet not connected"}</span><button class="btn btn-primary" data-action="take-seat">${state.walletConnected ? "Lock buy-in & take seat" : "Connect & continue"}</button>`,
   }));
 }

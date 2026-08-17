@@ -6,6 +6,11 @@
   "scripts": {
     "test": "node --test",
     "test:beacon": "node server/beacon-smoke.js",
+    "test:poker": "node --test server/poker/*.test.js",
+    "test:settlement": "node --test server/settlement/*.test.js",
+    "test:contract": "cargo test --manifest-path settlement/Cargo.toml --workspace",
+    "build:contract": "cd settlement && anchor build --ignore-keys",
+    "smoke:contract-runtime": "cd settlement && node runtime-smoke.mjs",
     "audit": "npm audit --omit=dev --audit-level=high",
     "fairness:demo": "node fairness/demo.js",
     "start": "node server/http.js"

@@ -1,5 +1,8 @@
 .vercel
 node_modules/
+.anchor/
+settlement/target/
+settlement/test-ledger/
 .env
 .env.*
 !.env.example

@@ -1,0 +1,24 @@
+[package]
+name = "xpoker-escrow"
+version = "0.1.0"
+description = "Devnet escrow and Merkle settlement program for xPoker"
+edition = "2021"
+
+[lib]
+crate-type = ["cdylib", "lib"]
+name = "xpoker_escrow"
+
+[features]
+default = []
+cpi = ["no-entrypoint"]
+custom-heap = []
+custom-panic = []
+idl-build = ["anchor-lang/idl-build", "anchor-spl/idl-build"]
+no-entrypoint = []
+no-idl = []
+no-log-ix-name = []
+
+[dependencies]
+anchor-lang = { version = "=1.0.0", features = ["init-if-needed"] }
+anchor-spl = { version = "=1.0.0", features = ["token_2022"] }
+solana-sha256-hasher = { version = "=3.1.0", features = ["sha2"] }

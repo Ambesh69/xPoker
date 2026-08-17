@@ -23,6 +23,10 @@ function productionFixture() {
       redisUrl: "rediss://redis.example",
       dealerKeyProvider: "aws-kms",
       solanaRpcUrl: "https://rpc.example",
+      settlementCluster: "mainnet-beta",
+      settlementProgramId: "14dia6Spfd6qu6Q36caisExYQsLA9si4PqFpqfiQ8Z9S",
+      settlementProgramBinarySha256: "cd".repeat(32),
+      settlementUpgradeAuthority: "SysvarRent111111111111111111111111111111111",
       allowedOrigins: ["https://xpoker.example"],
       geofencingProvider: "provider",
       identityProvider: "provider",
@@ -34,6 +38,12 @@ function productionFixture() {
   const unsigned = {
       version: "xpoker-release/v1",
       buildCommit,
+      settlementProgram: {
+        cluster: "mainnet-beta",
+        programId: "14dia6Spfd6qu6Q36caisExYQsLA9si4PqFpqfiQ8Z9S",
+        binarySha256: "cd".repeat(32),
+        upgradeAuthority: "SysvarRent111111111111111111111111111111111",
+      },
       evidence: {
         applicationSecurityAudit: evidence(),
         cryptographyAudit: evidence(),

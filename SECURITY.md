@@ -17,5 +17,10 @@ Only the current `main` commit is supported. A production release must identify 
 - Wallet challenges and sessions are single-use/revocable and stored by hash.
 - Hand events and ledger entries are append-only after posting.
 - Monetary quantities use integer atomic units—never floating-point values.
+- A table session binds one canonical mint and Token-2022 program; cross-mint pots are forbidden.
+- Settlement payouts must equal the vault's credited base-unit balance exactly and use one-claim PDAs.
+- The release manifest must bind the Solana cluster, program address, SBF SHA-256 digest and upgrade authority.
 - A randomness response is accepted only after verification against the pinned drand Quicknet chain hash and public key.
 - Logs must never contain wallet signatures, session tokens, player seeds, hole cards, private keys, RFQ authorizations, or unredacted identity data.
+
+The checked-in settlement program is an unaudited local/devnet candidate. Its authority can commit a payout root and therefore remains a trusted role; do not represent it as trustless or use it with real assets before an independent contract audit and approved multisig/attestation design.
