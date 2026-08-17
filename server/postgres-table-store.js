@@ -7,6 +7,15 @@ import {
   serializeTableState,
 } from "./table-coordinator.js";
 
+const ACTIVE_TURN_EVENT_TYPES = new Set([
+  "HAND_STARTED",
+  "ACTION_APPLIED",
+  "ACTION_TIMED_OUT",
+  "STREET_DEALT",
+  "RUNOUT_DEALT",
+  "HAND_FINISHED",
+]);
+
 function eventFromRow(row) {
   return {
     version: row.event_version,
@@ -40,6 +49,10 @@ function activeTurn(event) {
     playerId: turn.playerId,
     deadlineAt: turn.deadlineAt,
   };
+}
+
+function mutatesActiveTurn(event) {
+  return ACTIVE_TURN_EVENT_TYPES.has(event.type);
 }
 
 export class PostgresTableEventStore {
@@ -193,15 +206,16 @@ export class PostgresTableEventStore {
       const currentHandId = event.type === "HAND_STARTED"
         ? event.payload.handId
         : event.type === "HAND_FINISHED" ? null : undefined;
+      const turnMutation = mutatesActiveTurn(event);
       const turn = activeTurn(event);
       await client.query(
         `UPDATE game_tables
             SET version = $2,
                 status = COALESCE($3, status),
                 current_hand_id = CASE WHEN $4 THEN $5 ELSE current_hand_id END,
-                action_deadline_at = $6,
-                event_head = $7,
-                updated_at = $8
+                action_deadline_at = CASE WHEN $6 THEN $7 ELSE action_deadline_at END,
+                event_head = $8,
+                updated_at = $9
           WHERE table_session_id = $1`,
         [
           tableId,
@@ -209,30 +223,33 @@ export class PostgresTableEventStore {
           nextStatus,
           currentHandId !== undefined,
           currentHandId,
+          turnMutation,
           turn?.deadlineAt ?? null,
           Buffer.from(event.eventHash, "hex"),
           event.occurredAt,
         ],
       );
 
-      if (turn) {
-        await client.query(
-          `INSERT INTO table_timeout_leases (
-             table_session_id, hand_id, betting_version, player_id, deadline_at,
-             lease_owner, lease_until, updated_at
-           ) VALUES ($1, $2, $3, $4, $5, NULL, NULL, $6)
-           ON CONFLICT (table_session_id) DO UPDATE
-             SET hand_id = EXCLUDED.hand_id,
-                 betting_version = EXCLUDED.betting_version,
-                 player_id = EXCLUDED.player_id,
-                 deadline_at = EXCLUDED.deadline_at,
-                 lease_owner = NULL,
-                 lease_until = NULL,
-                 updated_at = EXCLUDED.updated_at`,
-          [tableId, turn.handId, turn.bettingVersion, turn.playerId, turn.deadlineAt, event.occurredAt],
-        );
-      } else {
-        await client.query("DELETE FROM table_timeout_leases WHERE table_session_id = $1", [tableId]);
+      if (turnMutation) {
+        if (turn) {
+          await client.query(
+            `INSERT INTO table_timeout_leases (
+               table_session_id, hand_id, betting_version, player_id, deadline_at,
+               lease_owner, lease_until, updated_at
+             ) VALUES ($1, $2, $3, $4, $5, NULL, NULL, $6)
+             ON CONFLICT (table_session_id) DO UPDATE
+               SET hand_id = EXCLUDED.hand_id,
+                   betting_version = EXCLUDED.betting_version,
+                   player_id = EXCLUDED.player_id,
+                   deadline_at = EXCLUDED.deadline_at,
+                   lease_owner = NULL,
+                   lease_until = NULL,
+                   updated_at = EXCLUDED.updated_at`,
+            [tableId, turn.handId, turn.bettingVersion, turn.playerId, turn.deadlineAt, event.occurredAt],
+          );
+        } else {
+          await client.query("DELETE FROM table_timeout_leases WHERE table_session_id = $1", [tableId]);
+        }
       }
 
       if (event.sequence % this.snapshotEvery === 0) {
@@ -305,5 +322,62 @@ export class PostgresTableEventStore {
       leaseOwner: row.lease_owner,
       leaseUntil: new Date(row.lease_until).toISOString(),
     }));
+  }
+
+  async listPreviewTableIds() {
+    const result = await this.pool.query(
+      `SELECT game.table_session_id
+         FROM game_tables AS game
+         JOIN table_sessions AS session ON session.id = game.table_session_id
+        WHERE session.status = 'preview'
+          AND game.status IN ('waiting', 'hand_active')
+        ORDER BY game.updated_at ASC`,
+    );
+    return result.rows.map((row) => row.table_session_id);
+  }
+
+  async reconcileDeadline({ tableId, expectedVersion, turn }) {
+    const client = await this.pool.connect();
+    try {
+      await client.query("BEGIN");
+      const table = await client.query(
+        "SELECT version FROM game_tables WHERE table_session_id = $1 FOR UPDATE",
+        [tableId],
+      );
+      if (table.rowCount !== 1 || Number(table.rows[0].version) !== expectedVersion) {
+        await client.query("ROLLBACK");
+        return false;
+      }
+      await client.query(
+        "UPDATE game_tables SET action_deadline_at = $2 WHERE table_session_id = $1",
+        [tableId, turn?.deadlineAt ?? null],
+      );
+      if (turn) {
+        await client.query(
+          `INSERT INTO table_timeout_leases (
+             table_session_id, hand_id, betting_version, player_id, deadline_at,
+             lease_owner, lease_until, updated_at
+           ) VALUES ($1, $2, $3, $4, $5, NULL, NULL, now())
+           ON CONFLICT (table_session_id) DO UPDATE
+             SET hand_id = EXCLUDED.hand_id,
+                 betting_version = EXCLUDED.betting_version,
+                 player_id = EXCLUDED.player_id,
+                 deadline_at = EXCLUDED.deadline_at,
+                 lease_owner = NULL,
+                 lease_until = NULL,
+                 updated_at = EXCLUDED.updated_at`,
+          [tableId, turn.handId, turn.bettingVersion, turn.playerId, turn.deadlineAt],
+        );
+      } else {
+        await client.query("DELETE FROM table_timeout_leases WHERE table_session_id = $1", [tableId]);
+      }
+      await client.query("COMMIT");
+      return true;
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw error;
+    } finally {
+      client.release();
+    }
   }
 }

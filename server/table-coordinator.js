@@ -22,6 +22,14 @@ const GENESIS_HASH = "0".repeat(64);
 const TABLE_STATUSES = new Set(["WAITING", "HAND_ACTIVE", "PAUSED", "CLOSED"]);
 const GAME_TYPES = new Set(["NLH", "PLO4", "ROE"]);
 const PLAYER_STATUSES = new Set(["SEATED", "PLAYING", "SITTING_OUT", "BUSTED"]);
+const ACTIVE_TURN_EVENT_TYPES = new Set([
+  "HAND_STARTED",
+  "ACTION_APPLIED",
+  "ACTION_TIMED_OUT",
+  "STREET_DEALT",
+  "RUNOUT_DEALT",
+  "HAND_FINISHED",
+]);
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const HEX_32 = /^[0-9a-f]{64}$/i;
 
@@ -244,6 +252,7 @@ export class MemoryTableEventStore {
   }
 
   #syncDeadline(tableId, event) {
+    if (!ACTIVE_TURN_EVENT_TYPES.has(event.type)) return;
     const betting = event.payload.betting;
     const turn = event.payload.turn;
     if (!betting || betting.status !== "BETTING" || !turn) {

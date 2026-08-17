@@ -55,6 +55,12 @@ test("leased timeout worker applies an expired turn exactly once", async () => {
     expectedVersion: 3,
     idempotencyKey: "worker-start-hand-001",
   });
+  await coordinator.leave({
+    tableId: TABLE_ID,
+    playerId: players[1],
+    expectedVersion: 4,
+    idempotencyKey: "worker-leave-during-clock-001",
+  });
   now = new Date("2026-08-17T12:00:11.000Z");
   const worker = createTimeoutWorker({
     store,
@@ -65,7 +71,7 @@ test("leased timeout worker applies an expired turn exactly once", async () => {
   assert.deepEqual(await worker.runOnce(), { claimed: 1, applied: 1 });
   assert.deepEqual(await worker.runOnce(), { claimed: 0, applied: 0 });
   const state = await coordinator.state(TABLE_ID);
-  assert.equal(state.version, 5);
+  assert.equal(state.version, 6);
   assert.equal((await coordinator.events(TABLE_ID)).filter((event) => event.type === "ACTION_TIMED_OUT").length, 1);
   await worker.stop();
 });

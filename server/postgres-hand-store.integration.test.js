@@ -159,6 +159,25 @@ test("Postgres hand store atomically persists an idempotent signed transcript", 
     [tableId],
   );
   assert.deepEqual(snapshots.rows.map((row) => Number(row.sequence)), [2, 4]);
+  await tableCoordinator.leave({
+    tableId,
+    playerId: "SysvarC1ock11111111111111111111111111111111",
+    expectedVersion: 4,
+    idempotencyKey: "postgres-table-leave-clock-001",
+  });
+  const stateWithLeavingPlayer = await tableCoordinator.state(tableId);
+  await pool.query("DELETE FROM table_timeout_leases WHERE table_session_id = $1", [tableId]);
+  await pool.query("UPDATE game_tables SET action_deadline_at = NULL WHERE table_session_id = $1", [tableId]);
+  assert.equal(await tableStore.reconcileDeadline({
+    tableId,
+    expectedVersion: stateWithLeavingPlayer.version,
+    turn: {
+      handId: stateWithLeavingPlayer.currentHand.betting.handId,
+      bettingVersion: stateWithLeavingPlayer.currentHand.betting.version,
+      playerId: stateWithLeavingPlayer.currentHand.turn.playerId,
+      deadlineAt: stateWithLeavingPlayer.currentHand.turn.deadlineAt,
+    },
+  }), true);
   const claimed = await tableStore.claimExpiredDeadlines({
     ownerId: "timeout-worker-001",
     now: new Date("2026-08-17T12:00:16.000Z"),

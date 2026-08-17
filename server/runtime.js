@@ -34,6 +34,29 @@ async function within(milliseconds, operation, label) {
   }
 }
 
+export async function recoverSafeBetaTables({ tableStore, tableCoordinator, dealer }) {
+  if (!dealer || !tableStore?.listPreviewTableIds || !tableStore?.reconcileDeadline) return { recovered: 0 };
+  const tableIds = await tableStore.listPreviewTableIds();
+  let recovered = 0;
+  for (const tableId of tableIds) {
+    const state = await tableCoordinator.state(tableId);
+    const betting = state.currentHand?.betting;
+    const activeTurn = state.status === "HAND_ACTIVE" && betting?.status === "BETTING" && state.currentHand?.turn
+      ? {
+          handId: betting.handId,
+          bettingVersion: betting.version,
+          playerId: state.currentHand.turn.playerId,
+          deadlineAt: state.currentHand.turn.deadlineAt,
+        }
+      : undefined;
+    if (await tableStore.reconcileDeadline({ tableId, expectedVersion: state.version, turn: activeTurn })) {
+      recovered += 1;
+    }
+    dealer.schedule(tableId);
+  }
+  return { recovered };
+}
+
 export async function createAuthoritativeRuntime({
   config,
   pool: suppliedPool,
@@ -101,6 +124,7 @@ export async function createAuthoritativeRuntime({
       dealer: safeBetaDealer,
     }) : undefined;
     if (safeBeta) await safeBeta.bootstrap();
+    await recoverSafeBetaTables({ tableStore, tableCoordinator, dealer: safeBetaDealer });
 
     async function health() {
       await within(2_000, Promise.all([
