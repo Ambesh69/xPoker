@@ -1,0 +1,49 @@
+{
+  "version": "xpoker-release/v1",
+  "buildCommit": "0000000000000000000000000000000000000000",
+  "evidence": {
+    "applicationSecurityAudit": {
+      "status": "pending",
+      "provider": "",
+      "reportSha256": "",
+      "expiresAt": ""
+    },
+    "cryptographyAudit": {
+      "status": "pending",
+      "provider": "",
+      "reportSha256": "",
+      "expiresAt": ""
+    },
+    "settlementContractAudit": {
+      "status": "pending",
+      "provider": "",
+      "reportSha256": "",
+      "expiresAt": ""
+    },
+    "penetrationTest": {
+      "status": "pending",
+      "provider": "",
+      "reportSha256": "",
+      "expiresAt": ""
+    },
+    "rngCertification": {
+      "status": "pending",
+      "provider": "",
+      "reportSha256": "",
+      "expiresAt": ""
+    },
+    "regulatoryApproval": {
+      "status": "pending",
+      "provider": "",
+      "reportSha256": "",
+      "expiresAt": ""
+    },
+    "incidentResponseDrill": {
+      "status": "pending",
+      "provider": "",
+      "reportSha256": "",
+      "expiresAt": ""
+    }
+  },
+  "signature": ""
+}

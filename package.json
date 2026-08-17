@@ -5,9 +5,17 @@
   "type": "module",
   "scripts": {
     "test": "node --test",
-    "fairness:demo": "node fairness/demo.js"
+    "test:beacon": "node server/beacon-smoke.js",
+    "audit": "npm audit --omit=dev --audit-level=high",
+    "fairness:demo": "node fairness/demo.js",
+    "start": "node server/http.js"
   },
   "engines": {
-    "node": ">=20"
+    "node": ">=20 <25"
+  },
+  "dependencies": {
+    "drand-client": "1.4.2",
+    "pg": "8.23.0",
+    "redis": "6.2.1"
   }
 }

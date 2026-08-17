@@ -31,7 +31,22 @@ npm test
 npm run fairness:demo
 ```
 
-This is a protocol foundation, not authorization for real-value play. External beacon signature verification, attested key isolation, immutable commitments, independent audits and regulatory certification are still release gates. See [`docs/FAIR-DEAL-PROTOCOL.md`](docs/FAIR-DEAL-PROTOCOL.md).
+This is a protocol foundation, not authorization for real-value play. The repository includes a signature-verifying beacon adapter, but production deployment of that adapter, attested key isolation, immutable external commitments, independent audits and regulatory certification remain release gates. See [`docs/FAIR-DEAL-PROTOCOL.md`](docs/FAIR-DEAL-PROTOCOL.md).
+
+## Production safety foundation
+
+The repository also contains a fail-closed backend candidate under `server/` and `db/`:
+
+- Signature-verified, future-round drand Quicknet integration with pinned trust roots.
+- Ed25519-signed, hash-chained hand transcripts.
+- Domain-bound, expiring, one-time Solana wallet challenges and hashed sessions.
+- An authoritative, versioned and idempotent fairness coordinator.
+- Durable PostgreSQL and Redis adapters.
+- Append-only hand events and a per-asset balanced atomic-unit ledger schema.
+- A separately signed release manifest that keeps real-value mode disabled until every audit, certification, infrastructure and regulatory gate is valid.
+- GitHub CI across Node 20/22 with live PostgreSQL 16 and Redis 7.4 integration tests.
+
+Run deterministic checks with `npm test`, dependency checks with `npm run audit`, and a live verified beacon smoke test with `npm run test:beacon`. The current Vercel deployment remains a safe frontend preview; it is not an authoritative game server. See [`docs/PRODUCTION-READINESS.md`](docs/PRODUCTION-READINESS.md) for the architecture and remaining launch blockers.
 
 ## Included flows
 

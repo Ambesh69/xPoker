@@ -86,7 +86,7 @@ function topbar(title = "Public tables") {
     <header class="topbar">
       <div class="crumbs"><span>Game floor</span><span>／</span><strong>${title}</strong></div>
       <div class="top-actions">
-        <span class="quote-status"><i class="market-dot"></i>Indicative quotes</span>
+        <span class="quote-status"><i class="market-dot"></i>Preview · no funds move</span>
         <button class="btn btn-ghost btn-small" data-action="open-buy">Buy xStocks</button>
         <button class="btn ${state.walletConnected ? "" : "btn-primary"} wallet-btn" data-action="open-wallet">
           ${state.walletConnected ? `<span class="wallet-avatar">xP</span>${state.walletAddress}` : "Connect wallet"}
@@ -113,7 +113,7 @@ function roomCard(room, index) {
   const avatarColors = ["#ccecff", "#ddd5ff", "#ffd9a2", "#d7ff86"];
   return `
     <article class="room-card" style="--room-accent:${room.accent}" data-action="open-buyin" data-room="${room.id}" tabindex="0" aria-label="Join ${room.name}">
-      <div class="room-top"><span class="game-pill">${room.game === "ROE" ? "NLH ↔ PLO 4" : room.game}</span><span class="status-pill"><i class="market-dot"></i>Live</span></div>
+      <div class="room-top"><span class="game-pill">${room.game === "ROE" ? "NLH ↔ PLO 4" : room.game}</span><span class="status-pill"><i class="market-dot"></i>Preview</span></div>
       <h3>${room.name}</h3>
       <span class="blinds">${room.blinds} · 6 max</span>
       <div class="room-stats">
@@ -384,7 +384,7 @@ function createRoom() {
   saveRooms();
   closeModal();
   render();
-  toast(`${room.name} is live. Invite code: ${room.code}`);
+  toast(`${room.name} is ready in preview. Invite code: ${room.code}`);
 }
 
 function buyStocksModal() {
