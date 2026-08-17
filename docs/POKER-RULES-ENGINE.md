@@ -1,6 +1,6 @@
 # Authoritative poker rules engine
 
-Status: implemented and unit tested as a pure deterministic core; service/realtime integration remains blocked for real-value play.
+Status: deterministic core and authoritative realtime candidate implemented; real-value play remains release-gated.
 
 The engine under `server/poker/` is the sole rules authority. A browser may render legal actions, but it must never calculate an accepted bet, winner, side pot, rake amount, or payout.
 
@@ -47,5 +47,4 @@ Every accepted command includes `expectedVersion`. The durable service must appe
 
 ## Still required around the engine
 
-Reconnect leases, explicit sit-out/return state, time-bank consumption, ROE hand scheduling, tournament rules, collusion detection, encrypted hole-card delivery, authoritative websocket commands, recovery/replay tests and large randomized/property test suites remain service-level work. Those gaps keep real-value mode disabled even though the mathematical core is implemented.
-
+The service layer now covers reconnect replay, leased timeouts, explicit sit-out/return/leave state, time-bank consumption, ROE scheduling, wallet-bound WebSocket commands, connection-encrypted hole-card envelopes, append-only snapshots and deterministic randomized tests. Tournament rules, collusion/bot detection, production hand-history UX, attested-dealer wiring, load/chaos certification and independent review remain incomplete. Those gaps keep real-value mode disabled even though the mathematical and orchestration cores are implemented.

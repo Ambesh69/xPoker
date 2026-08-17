@@ -13,6 +13,7 @@
     "smoke:contract-runtime": "cd settlement && node runtime-smoke.mjs",
     "audit": "npm audit --omit=dev --audit-level=high",
     "fairness:demo": "node fairness/demo.js",
+    "migrate": "node server/migrate.js",
     "start": "node server/http.js"
   },
   "engines": {
@@ -21,6 +22,7 @@
   "dependencies": {
     "drand-client": "1.4.2",
     "pg": "8.23.0",
-    "redis": "6.2.1"
+    "redis": "6.2.1",
+    "ws": "8.21.3"
   }
 }

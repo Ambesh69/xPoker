@@ -36,9 +36,10 @@ export class RedisChallengeStore {
 }
 
 export class RedisSessionStore {
-  constructor(client, { prefix = "xpoker:session:" } = {}) {
+  constructor(client, { prefix = "xpoker:session:", clock = () => new Date() } = {}) {
     this.client = client;
     this.prefix = prefix;
+    this.clock = clock;
     this.durable = true;
   }
 
@@ -48,10 +49,11 @@ export class RedisSessionStore {
     }
     const token = randomBytes(32).toString("base64url");
     const tokenHash = keyHash(token);
+    const now = this.clock();
     const record = {
       wallet,
-      issuedAt: new Date().toISOString(),
-      expiresAt: new Date(Date.now() + ttlSeconds * 1_000).toISOString(),
+      issuedAt: now.toISOString(),
+      expiresAt: new Date(now.getTime() + ttlSeconds * 1_000).toISOString(),
     };
     const result = await this.client.set(`${this.prefix}${tokenHash}`, JSON.stringify(record), {
       EX: ttlSeconds,
@@ -70,5 +72,33 @@ export class RedisSessionStore {
   async revoke(token) {
     if (typeof token !== "string" || token.length < 32) return false;
     return (await this.client.del(`${this.prefix}${keyHash(token)}`)) === 1;
+  }
+}
+
+export class RedisRateLimiter {
+  constructor(client, { prefix = "xpoker:rate:" } = {}) {
+    if (!client?.eval) throw new Error("A Redis rate-limit client is required");
+    this.client = client;
+    this.prefix = prefix;
+  }
+
+  async consume(identifier, { limit, windowMs }) {
+    if (typeof identifier !== "string" || identifier.length === 0) throw new Error("Rate-limit identity is required");
+    if (!Number.isInteger(limit) || limit < 1 || limit > 10_000) throw new Error("Rate limit is invalid");
+    if (!Number.isInteger(windowMs) || windowMs < 1_000 || windowMs > 3_600_000) {
+      throw new Error("Rate-limit window is invalid");
+    }
+    const key = `${this.prefix}${keyHash(identifier)}`;
+    const [count, ttl] = await this.client.eval(
+      `local count = redis.call('INCR', KEYS[1])
+       if count == 1 then redis.call('PEXPIRE', KEYS[1], ARGV[1]) end
+       return { count, redis.call('PTTL', KEYS[1]) }`,
+      { keys: [key], arguments: [String(windowMs)] },
+    );
+    return Object.freeze({
+      allowed: Number(count) <= limit,
+      remaining: Math.max(0, limit - Number(count)),
+      retryAfterMs: Math.max(0, Number(ttl)),
+    });
   }
 }

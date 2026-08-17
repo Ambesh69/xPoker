@@ -52,6 +52,8 @@ The Vercel deployment remains appropriate for static UI delivery. It is not the 
 - Atomic Redis `GETDEL` challenge consumption.
 - Opaque 256-bit sessions stored only by SHA-256 hash and explicitly revocable.
 - Per-hand optimistic versions and strong idempotency keys.
+- Strict-origin `xpoker.v1` WebSockets with wallet-bound commands, reconnect cursors, payload/rate limits, heartbeat and slow-client eviction.
+- Per-connection X25519/HKDF/AES-GCM private-card envelopes bound to wallet, table, hand and committed deck root.
 
 ### Data integrity
 
@@ -62,6 +64,9 @@ The Vercel deployment remains appropriate for static UI delivery. It is not the 
 - Posted ledger entries and transactions are immutable; corrections require reversal transactions.
 - Settlement intents are idempotent and chain signatures are unique.
 - Transactional outbox table supports reliable event publication.
+- Hash-chained table events and checksum-verified, append-only recovery snapshots.
+- Cross-instance Redis pub/sub is treated only as transient fanout; reconnects replay from PostgreSQL.
+- Checksum-locked, advisory-lock-serialized schema migrations reject altered migration history.
 
 ### Poker rules core
 
@@ -70,6 +75,8 @@ The Vercel deployment remains appropriate for static UI delivery. It is not the 
 - NLH best-five and PLO exactly-two/exactly-three showdown evaluation.
 - Side pots, unmatched refunds, one/two-board splits, deterministic odd chips, capped rake and no-flop-no-drop.
 - Atomic-unit conservation assertions at pot, rake and payout boundaries.
+- Event-sourced NLH/PLO4/ROE orchestration with deterministic button/game rotation, sit-out/return/leave behavior, action clocks, time-bank consumption and leased timeout recovery.
+- Deterministic randomized testing covers 500 additional NLH/PLO4 hands for termination, version monotonicity and chip conservation.
 
 ### Settlement candidate
 
@@ -100,9 +107,9 @@ Prices are never used past a configured freshness limit. RFQ authorizations are 
 
 The following are deliberately not represented as complete:
 
-1. Durable/realtime integration of the tested poker core, including reconnect leases, sit-out/return, time-bank consumption, ROE scheduling, recovery replay, encrypted hole-card delivery and randomized/property testing.
+1. Complete frontend Wallet Standard/API integration; the transport, recovery, timers, ROE scheduling, encrypted envelopes and deterministic randomized tests are implemented.
 2. Independent audit of the Solana escrow program plus an audited multisig/attestation, dispute watcher and upgrade/governance process.
-3. Production implementations for encrypted hole-card delivery and dealer key isolation/remote attestation.
+3. Production attested-dealer wiring for the implemented encrypted hole-card transport, plus dealer key isolation/remote attestation.
 4. Frontend integration with Wallet Standard and the production API/realtime service.
 5. xStocks integrator credentials and atomic RFQ integration.
 6. KYC/age, sanctions, geofencing, responsible-gaming limits, self-exclusion and jurisdiction-specific reporting.
@@ -122,6 +129,7 @@ The following are deliberately not represented as complete:
 
 ```bash
 npm ci
+npm run migrate
 npm test
 npm run audit
 npm run test:beacon

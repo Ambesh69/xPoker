@@ -14,12 +14,13 @@ function origins(value) {
 export function loadConfig(env = process.env) {
   const nodeEnv = env.NODE_ENV ?? "development";
   if (!["development", "test", "production"].includes(nodeEnv)) throw new Error("Invalid NODE_ENV");
+  const publicOrigin = new URL(env.PUBLIC_ORIGIN ?? "http://localhost:4173").origin;
   return Object.freeze({
     nodeEnv,
     host: env.HOST ?? "127.0.0.1",
     port: integer(env.PORT, 8787, { minimum: 1, maximum: 65_535, label: "PORT" }),
-    publicOrigin: env.PUBLIC_ORIGIN ?? "http://localhost:4173",
-    allowedOrigins: origins(env.ALLOWED_ORIGINS ?? env.PUBLIC_ORIGIN),
+    publicOrigin,
+    allowedOrigins: origins(env.ALLOWED_ORIGINS ?? publicOrigin),
     realValueMode: env.REAL_VALUE_MODE === "enabled",
     databaseUrl: env.DATABASE_URL,
     redisUrl: env.REDIS_URL,

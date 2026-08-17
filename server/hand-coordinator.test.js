@@ -107,6 +107,12 @@ async function reachDealing(coordinator) {
 test("authoritative coordinator completes a signed, verifiable hand lifecycle", async () => {
   const { coordinator, keypair, store } = setup();
   const { committedHand, version } = await reachDealing(coordinator);
+  const privateDeal = await coordinator.holeCardsFor({ handId, playerId: "wallet-a" });
+  assert.deepEqual(
+    privateDeal.reveals.map((reveal) => reveal.position),
+    dealPlan(rules).holeCards[0],
+  );
+  assert.equal(privateDeal.reveals.every((reveal) => reveal.card.id >= 0 && reveal.card.id < 52), true);
   const flopPosition = dealPlan(rules).boards[0].flop[0];
   const reveal = revealCard(committedHand.secretState.deck, flopPosition);
   const revealed = await coordinator.revealPublicCard({

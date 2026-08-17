@@ -183,7 +183,9 @@ export class AuthoritativeHandCoordinator {
   }
 
   async openHand({ handId, roomId, rules, players, serverCommitment, idempotencyKey }) {
-    const payload = { roomId, rules, players: [...players].sort(), serverCommitment };
+    // The participant array is authoritative seat order. Entropy inputs are
+    // independently sorted by player id inside the fair-deal derivation.
+    const payload = { roomId, rules, players: [...players], serverCommitment };
     const replay = await this.#replay({ handId, idempotencyKey, type: "HAND_OPENED", payload });
     if (replay) return replay;
     assert(/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(roomId), "A valid room id is required");
@@ -328,6 +330,32 @@ export class AuthoritativeHandCoordinator {
       payload,
     });
     return { ...result, reveal };
+  }
+
+  async holeCardsFor({ handId, playerId }) {
+    const state = await this.state(handId);
+    assert(state.status === "DEALING", "Hole cards are unavailable in the current hand state");
+    const seat = state.players.indexOf(playerId);
+    assert(seat >= 0, "Player is not seated in this hand");
+    const committedHand = await this.dealerStore.get(handId);
+    assert(committedHand, "Dealer secret is unavailable");
+    assert(committedHand.publicRecord.deckRoot === state.deckRoot, "Dealer secret differs from the committed deck");
+    const plan = dealPlan({
+      game: state.rules.game,
+      seats: state.rules.seats,
+      buttonSeat: state.rules.buttonSeat,
+      boards: state.rules.boards ?? 1,
+    });
+    const reveals = plan.holeCards[seat].map((position) => revealCard(committedHand.secretState.deck, position));
+    assert(reveals.every((reveal) => verifyCardReveal(state.deckRoot, reveal)), "Private-card proof is invalid");
+    return Object.freeze({
+      version: "xpoker-private-deal/v1",
+      handId,
+      playerId,
+      game: state.rules.game,
+      deckRoot: state.deckRoot,
+      reveals,
+    });
   }
 
   async completeHand({ handId, expectedVersion, idempotencyKey }) {

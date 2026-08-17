@@ -1,9 +1,11 @@
 import assert from "node:assert/strict";
 import { generateKeyPairSync } from "node:crypto";
-import { readFile } from "node:fs/promises";
 import test from "node:test";
 
+import { applyMigrations } from "./migrate.js";
 import { PostgresHandEventStore, createPostgresPool } from "./postgres-hand-store.js";
+import { PostgresTableEventStore } from "./postgres-table-store.js";
+import { AuthoritativeTableCoordinator, nextHandSetup } from "./table-coordinator.js";
 import { TranscriptSigner, verifyTranscript } from "./transcript.js";
 
 const connectionString = process.env.DATABASE_URL_TEST;
@@ -12,11 +14,13 @@ test("Postgres hand store atomically persists an idempotent signed transcript", 
   skip: !connectionString,
 }, async () => {
   const pool = await createPostgresPool({ connectionString });
-  const migrations = await Promise.all([
-    readFile(new URL("../db/001_core.sql", import.meta.url), "utf8"),
-    readFile(new URL("../db/002_gameplay_settlement.sql", import.meta.url), "utf8"),
+  const migrationResult = await applyMigrations({ pool });
+  assert.deepEqual(migrationResult.applied, [
+    "001_core.sql",
+    "002_gameplay_settlement.sql",
+    "003_realtime_tables.sql",
   ]);
-  for (const migration of migrations) await pool.query(migration);
+  assert.deepEqual((await applyMigrations({ pool })).applied, []);
   const roomId = "018f47a6-7b9d-7cc3-8a23-60bfc31e3f45";
   await pool.query(
     `INSERT INTO rooms (id, visibility, status, rules, rules_hash)
@@ -89,6 +93,86 @@ test("Postgres hand store atomically persists an idempotent signed transcript", 
   );
   await assert.rejects(
     pool.query("UPDATE hand_state_snapshots SET state = '{}' WHERE hand_id = $1", [input.handId]),
+    /append-only/i,
+  );
+
+  const tableId = tableSession.rows[0].id;
+  const tableStore = new PostgresTableEventStore({ pool, snapshotEvery: 2 });
+  const tableCoordinator = new AuthoritativeTableCoordinator({
+    store: tableStore,
+    clock: () => new Date("2026-08-17T12:00:00.000Z"),
+  });
+  const tableRules = {
+    game: "NLH",
+    seats: 2,
+    smallBlindAtomic: "10",
+    bigBlindAtomic: "20",
+    minimumBuyInAtomic: "100",
+    maximumBuyInAtomic: "2000",
+    actionClockMs: 5_000,
+    timeBankMs: 10_000,
+  };
+  await tableCoordinator.createTable({
+    tableId,
+    roomId,
+    assetMint: "SysvarRecentB1ockHashes11111111111111111111",
+    allowlistVersion: "test-v001",
+    rules: tableRules,
+    idempotencyKey: "postgres-table-create-0001",
+  });
+  await tableCoordinator.seatPlayer({
+    tableId,
+    playerId: "11111111111111111111111111111111",
+    seat: 0,
+    buyInAtomic: "1000",
+    expectedVersion: 1,
+    idempotencyKey: "postgres-table-seat-a-001",
+  });
+  await tableCoordinator.seatPlayer({
+    tableId,
+    playerId: "SysvarC1ock11111111111111111111111111111111",
+    seat: 1,
+    buyInAtomic: "1000",
+    expectedVersion: 2,
+    idempotencyKey: "postgres-table-seat-b-001",
+  });
+  const setup = nextHandSetup(await tableCoordinator.state(tableId));
+  await pool.query(
+    `INSERT INTO hands (id, room_id, status, version, deck_root)
+     VALUES ($1, $2, 'dealing', 1, $3)`,
+    [setup.handId, roomId, Buffer.from("34".repeat(32), "hex")],
+  );
+  await tableCoordinator.startHand({
+    tableId,
+    handId: setup.handId,
+    deckRoot: "34".repeat(32),
+    fairnessTranscriptHead: "56".repeat(32),
+    expectedVersion: 3,
+    idempotencyKey: "postgres-table-start-001",
+  });
+  const recoveredTable = await tableCoordinator.state(tableId);
+  assert.equal(recoveredTable.status, "HAND_ACTIVE");
+  assert.equal(recoveredTable.currentHand.turn.playerId, "11111111111111111111111111111111");
+  const snapshots = await pool.query(
+    "SELECT sequence FROM table_state_snapshots WHERE table_session_id = $1 ORDER BY sequence",
+    [tableId],
+  );
+  assert.deepEqual(snapshots.rows.map((row) => Number(row.sequence)), [2, 4]);
+  const claimed = await tableStore.claimExpiredDeadlines({
+    ownerId: "timeout-worker-001",
+    now: new Date("2026-08-17T12:00:16.000Z"),
+  });
+  assert.equal(claimed.length, 1);
+  assert.equal((await tableStore.claimExpiredDeadlines({
+    ownerId: "timeout-worker-002",
+    now: new Date("2026-08-17T12:00:16.000Z"),
+  })).length, 0);
+  await assert.rejects(
+    pool.query("UPDATE table_events SET payload = '{}' WHERE table_session_id = $1", [tableId]),
+    /append-only/i,
+  );
+  await assert.rejects(
+    pool.query("DELETE FROM table_state_snapshots WHERE table_session_id = $1", [tableId]),
     /append-only/i,
   );
   await pool.end();

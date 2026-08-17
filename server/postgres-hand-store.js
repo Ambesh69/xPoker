@@ -146,5 +146,12 @@ export class PostgresHandEventStore {
 
 export async function createPostgresPool({ connectionString, max = 20 } = {}) {
   const { Pool } = await import("pg");
-  return new Pool({ connectionString, max, idleTimeoutMillis: 30_000 });
+  return new Pool({
+    connectionString,
+    max,
+    idleTimeoutMillis: 30_000,
+    connectionTimeoutMillis: 5_000,
+    query_timeout: 5_000,
+    statement_timeout: 5_000,
+  });
 }

@@ -42,13 +42,16 @@ The repository also contains a fail-closed backend candidate under `server/` and
 - Domain-bound, expiring, one-time Solana wallet challenges and hashed sessions.
 - An authoritative, versioned and idempotent fairness coordinator.
 - A deterministic NLH/PLO4 rules core covering betting, all-ins, PLO pot limits, showdown, side pots, two boards, odd chips and rake.
+- An event-sourced NLH/PLO4/ROE table coordinator with reconnect replay, sit-out/return/leave semantics, action clocks, time banks and leased timeout workers.
+- An authenticated WebSocket protocol with strict origin checks, wallet-bound commands, rate/size limits and cross-instance Redis fanout.
+- Connection-bound X25519/HKDF/AES-GCM hole-card envelopes containing private Merkle proofs; plaintext delivery still requires the release-gated isolated dealer.
 - A locally compiled Token-2022 escrow candidate with Merkle pull-claims and timeout refunds; it is devnet-only until audited.
-- Durable PostgreSQL and Redis adapters.
+- Durable PostgreSQL and Redis adapters, checksum-locked migrations, hash-chained table events and append-only recovery snapshots.
 - Append-only hand events and a per-asset balanced atomic-unit ledger schema.
 - A separately signed release manifest that keeps real-value mode disabled until every audit, certification, infrastructure and regulatory gate is valid.
 - GitHub CI across Node 20/22 with live PostgreSQL 16 and Redis 7.4 integration tests.
 
-Run deterministic checks with `npm test`, dependency checks with `npm run audit`, and a live verified beacon smoke test with `npm run test:beacon`. The current Vercel deployment remains a safe frontend preview; it is not an authoritative game server. See [`docs/POKER-RULES-ENGINE.md`](docs/POKER-RULES-ENGINE.md), [`docs/SETTLEMENT-PROTOCOL.md`](docs/SETTLEMENT-PROTOCOL.md), and [`docs/PRODUCTION-READINESS.md`](docs/PRODUCTION-READINESS.md).
+Run deterministic checks with `npm test`, dependency checks with `npm run audit`, and a live verified beacon smoke test with `npm run test:beacon`. The current Vercel deployment remains a safe frontend preview; it is not an authoritative game server and no funds move. See [`docs/POKER-RULES-ENGINE.md`](docs/POKER-RULES-ENGINE.md), [`docs/REALTIME-PROTOCOL.md`](docs/REALTIME-PROTOCOL.md), [`docs/SETTLEMENT-PROTOCOL.md`](docs/SETTLEMENT-PROTOCOL.md), and [`docs/PRODUCTION-READINESS.md`](docs/PRODUCTION-READINESS.md).
 
 The contract checks are `npm run test:contract`, `npm run build:contract`, and `npm run smoke:contract-runtime`; they require Rust, Solana CLI 3.x and Anchor CLI 1.0.0. CI runs all three in the official version-pinned Anchor 1.0.0 image.
 
@@ -78,7 +81,7 @@ The wallet and purchase steps are simulated. A production release needs:
 2. Canonical mint/contract allowlisting by chain, never ticker-string matching.
 3. xStocks multiplier-aware balances and oracle/RFQ price freshness checks.
 4. An escrow or non-custodial game-settlement contract audited for NLH and PLO side pots, split pots, disconnects, and disputes.
-5. Server-authoritative game state, verifiable shuffle/RNG, collusion controls, hand histories, and responsible-gaming limits.
+5. Production wiring for the server-authoritative candidate plus collusion controls, hand-history UX, load/chaos testing, and responsible-gaming limits.
 6. xStocks integrator onboarding for the atomic RFQ flow. A quote returns a ready-to-execute EVM authorization or partially signed Solana transaction; the wallet must execute it before expiry.
 7. Jurisdiction gating, age checks, KYC/AML where required, sanctions screening, gambling licensing analysis, securities/financial-promotion review, tax reporting, and geofencing. xStocks currently excludes several jurisdictions, including the U.S., U.K., Canada, and Australia.
 

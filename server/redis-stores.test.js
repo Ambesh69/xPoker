@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { RedisChallengeStore, RedisSessionStore } from "./redis-stores.js";
+import { RedisChallengeStore, RedisRateLimiter, RedisSessionStore } from "./redis-stores.js";
 
 class FakeRedis {
   constructor() {
@@ -27,6 +27,12 @@ class FakeRedis {
   async del(key) {
     return this.values.delete(key) ? 1 : 0;
   }
+
+  async eval(_script, { keys, arguments: [windowMs] }) {
+    const next = Number(this.values.get(keys[0]) ?? 0) + 1;
+    this.values.set(keys[0], next);
+    return [next, Number(windowMs)];
+  }
 }
 
 test("Redis challenge adapter atomically consumes one-time records", async () => {
@@ -45,4 +51,14 @@ test("Redis sessions store only a token hash and support revocation", async () =
   assert.equal([...redis.values.keys()].some((key) => key.includes(session.token)), false);
   assert.equal(await store.revoke(session.token), true);
   assert.equal(await store.authenticate(session.token), undefined);
+});
+
+test("Redis rate limits use hashed fixed-window identities", async () => {
+  const redis = new FakeRedis();
+  const limiter = new RedisRateLimiter(redis);
+  assert.equal((await limiter.consume("wallet-a:127.0.0.1", { limit: 2, windowMs: 60_000 })).allowed, true);
+  assert.equal((await limiter.consume("wallet-a:127.0.0.1", { limit: 2, windowMs: 60_000 })).allowed, true);
+  const blocked = await limiter.consume("wallet-a:127.0.0.1", { limit: 2, windowMs: 60_000 });
+  assert.equal(blocked.allowed, false);
+  assert.equal([...redis.values.keys()].some((key) => key.includes("wallet-a")), false);
 });
