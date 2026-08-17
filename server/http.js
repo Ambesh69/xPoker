@@ -44,11 +44,116 @@ function authCors(config, request) {
   if (!config.allowedOrigins.includes(normalized)) return undefined;
   return {
     "access-control-allow-origin": normalized,
-    "access-control-allow-methods": "POST, OPTIONS",
+    "access-control-allow-methods": "GET, POST, OPTIONS",
     "access-control-allow-headers": "authorization, content-type, x-request-id",
     "access-control-max-age": "600",
     vary: "Origin",
   };
+}
+
+async function authenticatedWallet(auth, request) {
+  const token = bearerToken(request);
+  if (!token || !auth?.sessionStore) return undefined;
+  const session = await auth.sessionStore.authenticate(token);
+  if (!session || Date.parse(session.expiresAt) <= Date.now()) return undefined;
+  return session.wallet;
+}
+
+async function handleSafeBeta({ request, response, requestId, url, config, auth, safeBeta }) {
+  const cors = authCors(config, request);
+  if (!cors) {
+    sendJson(response, 403, { error: "origin_forbidden", requestId }, requestId);
+    return;
+  }
+  if (request.method === "OPTIONS") {
+    response.writeHead(204, { ...SECURITY_HEADERS, ...cors, "x-request-id": requestId });
+    response.end();
+    return;
+  }
+  if (!safeBeta) {
+    sendJson(response, 503, { error: "safe_beta_unavailable", requestId }, requestId, cors);
+    return;
+  }
+  try {
+    if (url.pathname === "/v1/beta/demo-session" && request.method === "POST") {
+      const body = await readJson(request, config.bodyLimitBytes);
+      const rate = await enforceAuthRateLimit({ auth, request, route: "guest", identity: "safe-beta" });
+      if (rate && !rate.allowed) {
+        sendJson(response, 429, { error: "rate_limited", requestId }, requestId, {
+          ...cors,
+          "retry-after": String(Math.max(1, Math.ceil(rate.retryAfterMs / 1_000))),
+        });
+        return;
+      }
+      const result = await safeBeta.issueGuest({ name: body.displayName });
+      sendJson(response, 201, { ...result, fundsMove: false, requestId }, requestId, cors);
+      return;
+    }
+    const wallet = await authenticatedWallet(auth, request);
+    if (url.pathname === "/v1/beta/lobby" && request.method === "GET") {
+      const result = await safeBeta.lobby({ wallet });
+      sendJson(response, 200, { ...result, requestId }, requestId, cors);
+      return;
+    }
+    if (!wallet) {
+      sendJson(response, 401, { error: "authentication_required", requestId }, requestId, cors);
+      return;
+    }
+    if (request.method !== "GET") {
+      const rate = await enforceAuthRateLimit({ auth, request, route: "beta-write", identity: wallet });
+      if (rate && !rate.allowed) {
+        sendJson(response, 429, { error: "rate_limited", requestId }, requestId, {
+          ...cors,
+          "retry-after": String(Math.max(1, Math.ceil(rate.retryAfterMs / 1_000))),
+        });
+        return;
+      }
+    }
+    if (url.pathname === "/v1/beta/rooms" && request.method === "POST") {
+      const body = await readJson(request, config.bodyLimitBytes);
+      const result = await safeBeta.createPrivateRoom({ wallet, input: body });
+      sendJson(response, 201, { ...result, fundsMove: false, requestId }, requestId, cors);
+      return;
+    }
+    if (url.pathname === "/v1/beta/rooms/join" && request.method === "POST") {
+      const body = await readJson(request, config.bodyLimitBytes);
+      const result = await safeBeta.joinPrivateRoom({ wallet, code: body.inviteCode });
+      sendJson(response, 200, { ...result, fundsMove: false, requestId }, requestId, cors);
+      return;
+    }
+    if (url.pathname === "/v1/beta/tables/join" && request.method === "POST") {
+      const body = await readJson(request, config.bodyLimitBytes);
+      const result = await safeBeta.joinTable({
+        wallet,
+        roomId: body.roomId,
+        assetSymbol: body.assetSymbol,
+        buyInAtomic: body.buyInAtomic,
+      });
+      sendJson(response, 200, { ...result, requestId }, requestId, cors);
+      return;
+    }
+    const auditMatch = /^\/v1\/beta\/hands\/(table:[0-9a-f-]{36}:[1-9][0-9]*)\/audit$/i.exec(url.pathname);
+    if (auditMatch && request.method === "GET") {
+      const result = await safeBeta.handAudit({ wallet, handId: auditMatch[1] });
+      sendJson(response, 200, { ...result, requestId }, requestId, cors);
+      return;
+    }
+    sendJson(response, 404, { error: "not_found", requestId }, requestId, cors);
+  } catch (error) {
+    const expected = Number.isInteger(error?.statusCode);
+    const statusCode = expected ? error.statusCode : 500;
+    if (!expected) console.error(JSON.stringify({
+      level: "error",
+      event: "safe_beta_http_failed",
+      requestId,
+      error: error instanceof Error ? error.message : String(error),
+    }));
+    sendJson(response, statusCode, {
+      error: expected ? error?.code ?? "invalid_request" : "internal_error",
+      message: expected && error instanceof Error ? error.message : "Safe beta request failed",
+      requestId,
+    }, requestId, cors);
+  }
 }
 
 async function readJson(request, limitBytes) {
@@ -98,10 +203,10 @@ function bearerToken(request) {
 }
 
 async function enforceAuthRateLimit({ auth, request, route, identity }) {
-  if (!auth.rateLimiter) return undefined;
+  if (!auth?.rateLimiter) return undefined;
   const remoteAddress = request.socket?.remoteAddress ?? "unknown";
   return auth.rateLimiter.consume(`${route}:${remoteAddress}:${identity}`, {
-    limit: route === "challenge" ? 20 : 30,
+    limit: route === "guest" ? 5 : route === "challenge" ? 20 : 30,
     windowMs: 60_000,
   });
 }
@@ -204,13 +309,17 @@ async function handleAuth({ request, response, requestId, url, config, auth }) {
   sendJson(response, 404, { error: "not_found", requestId }, requestId, cors);
 }
 
-export function createRequestHandler({ config, gates, auth, healthCheck }) {
+export function createRequestHandler({ config, gates, auth, safeBeta, healthCheck }) {
   return async (request, response) => {
     const suppliedRequestId = request.headers["x-request-id"];
     const requestId = typeof suppliedRequestId === "string" ? suppliedRequestId.slice(0, 128) : randomUUID();
     const url = new URL(request.url, "http://internal");
     if (url.pathname.startsWith("/v1/auth/") && !url.search) {
       await handleAuth({ request, response, requestId, url, config, auth });
+      return;
+    }
+    if (url.pathname.startsWith("/v1/beta/")) {
+      await handleSafeBeta({ request, response, requestId, url, config, auth, safeBeta });
       return;
     }
     if (request.method !== "GET") {
@@ -253,10 +362,10 @@ export function createRequestHandler({ config, gates, auth, healthCheck }) {
   };
 }
 
-export async function createApiServer({ config = loadConfig(), manifest, auth, healthCheck } = {}) {
+export async function createApiServer({ config = loadConfig(), manifest, auth, safeBeta, healthCheck } = {}) {
   const releaseManifest = manifest ?? await readManifest(config.releaseManifestPath);
   const gates = evaluateReleaseGates({ config, manifest: releaseManifest });
-  const server = createServer(createRequestHandler({ config, gates, auth, healthCheck }));
+  const server = createServer(createRequestHandler({ config, gates, auth, safeBeta, healthCheck }));
   server.releaseGates = gates;
   return server;
 }
@@ -266,7 +375,12 @@ export async function startApiServer({ config = loadConfig(), runtimeFactory = c
   const hasRedis = Boolean(config.redisUrl);
   if (hasDatabase !== hasRedis) throw new Error("DATABASE_URL and REDIS_URL must be configured together");
   const runtime = hasDatabase ? await runtimeFactory({ config }) : undefined;
-  const server = await createApiServer({ config, auth: runtime?.auth, healthCheck: runtime?.health });
+  const server = await createApiServer({
+    config,
+    auth: runtime?.auth,
+    safeBeta: runtime?.safeBeta,
+    healthCheck: runtime?.health,
+  });
   try {
     if (runtime) await runtime.attach(server);
     await new Promise((resolve, reject) => {

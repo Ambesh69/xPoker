@@ -1,6 +1,6 @@
 # xPoker
 
-A high-fidelity frontend prototype for public and private poker rooms with xStocks-denominated buy-ins.
+A safe multiplayer beta candidate for public and private poker rooms with xStocks-denominated demo buy-ins.
 
 ## Run it
 
@@ -10,7 +10,21 @@ python3 -m http.server 4173
 
 Then open `http://localhost:4173`.
 
-No build step or dependencies are required.
+No frontend build step is required. Without the authoritative API, the site remains an explicitly labeled interface preview.
+
+## Safe multiplayer beta
+
+The current client and server now provide real Solana wallet challenge signing, expiring guest sessions, four permanent public rooms, hashed-invite private rooms, idempotent table seating, authenticated WebSocket reconnects, encrypted private cards, automatic NLH/PLO 4/ROE hands using a future verified drand round, and post-hand audit retrieval. Demo credits are isolated from the real-value ledger and have no deposit, withdrawal, escrow, settlement, or cash-out path.
+
+Run the complete service with PostgreSQL and Redis after copying `.env.example`:
+
+```bash
+npm ci
+npm run migrate
+npm start
+```
+
+Then serve the frontend at `PUBLIC_ORIGIN`. See [`docs/SAFE-BETA.md`](docs/SAFE-BETA.md) for the API, fairness lifecycle, security boundary, and deployment requirements.
 
 ## Fair-deal foundation
 
@@ -75,7 +89,7 @@ This is a product allowlist, not a claim that xStocks publishes an official top-
 
 ## Production integration boundaries
 
-The wallet and purchase steps are simulated. A production release needs:
+Real token ownership, purchase, escrow, and settlement remain disabled. A real-value production release needs:
 
 1. A wallet adapter and signed wallet-ownership challenge.
 2. Canonical mint/contract allowlisting by chain, never ticker-string matching.

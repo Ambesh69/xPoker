@@ -19,6 +19,7 @@ test("Postgres hand store atomically persists an idempotent signed transcript", 
     "001_core.sql",
     "002_gameplay_settlement.sql",
     "003_realtime_tables.sql",
+    "004_safe_beta.sql",
   ]);
   assert.deepEqual((await applyMigrations({ pool })).applied, []);
   const roomId = "018f47a6-7b9d-7cc3-8a23-60bfc31e3f45";

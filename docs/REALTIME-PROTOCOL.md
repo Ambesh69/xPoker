@@ -1,6 +1,6 @@
 # xPoker authoritative realtime protocol
 
-Status: production-candidate transport; real-value activation remains release-gated.
+Status: active for the zero-value safe beta; real-value activation remains release-gated.
 
 The static Vercel site is not authoritative. A long-lived game service owns table versions, validates actions, persists the append-only event stream in PostgreSQL, leases expired turns, and fans committed events across instances through Redis.
 
@@ -80,6 +80,8 @@ The server responds with its ephemeral public key. Hole-card payloads and their 
 
 Plaintext private cards must come directly from the isolated dealer provider, must never enter table events, Redis pub/sub, ordinary logs, analytics, or browser persistence, and must be destroyed according to the audit-retention policy. The checked-in runtime accepts a private-card provider interface, but real-value release remains blocked until that provider runs in an independently reviewed attested dealer.
 
+The browser safe-beta client implements the connection-specific X25519 exchange and AES-GCM decryption. The safe-beta provider stores reconstruction material in TLS Redis for restart recovery; because that is not attested key isolation, it is allowed only while `REAL_VALUE_MODE=disabled`.
+
 ## Recovery and timers
 
 PostgreSQL stores immutable, hash-chained table events and checksum-verified append-only snapshots. Snapshots accelerate replay but do not replace event auditability. Every active turn also updates an operational deadline row. Workers claim expired turns with `FOR UPDATE SKIP LOCKED`, a bounded lease, the hand id, and betting version; stale workers cannot time out a newer turn.
@@ -91,6 +93,7 @@ Redis pub/sub is only low-latency fanout. It is not the source of truth. If a pu
 1. Apply checksum-locked migrations with `npm run migrate` using a migration principal.
 2. Start at least two game-service instances with TLS PostgreSQL and TLS Redis.
 3. Point the frontend at the HTTPS/WSS service origin and allowlist the exact frontend origin.
-4. Keep `REAL_VALUE_MODE=disabled` until every signed release gate passes.
+4. Set a stable `SAFE_BETA_SIGNING_KEY_PEM` through the host's secret manager.
+5. Keep `REAL_VALUE_MODE=disabled` until every signed release gate passes.
 
 The current public deployment is a preview: wallet and buy-in interactions do not move funds, the Vercel frontend does not operate the authoritative runtime, and the settlement candidate is not mainnet-authorized.

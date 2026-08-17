@@ -1,0 +1,71 @@
+# xPoker safe multiplayer beta
+
+Status: zero-value multiplayer candidate. `REAL_VALUE_MODE` must remain disabled.
+
+The safe beta exercises the production-shaped wallet, room, table, dealer, reconnect, and audit paths without accepting a deposit or creating a token transaction. xStock symbols are table denominations only. All stacks are non-withdrawable demo credits in two-decimal atomic units.
+
+## Safety boundary
+
+- `safe_beta_profiles` and room memberships are separate from `ledger_accounts`, settlement intents, escrow sessions, and onchain claims.
+- Demo asset identifiers are deterministic, disabled allowlist rows marked `safeBeta`, `nonTransferable`, and `indicative-demo`; they are not canonical token mints and cannot pass the real-value allowlist gate.
+- Every safe-beta table session has status `preview`. It has no escrow program, vault, deposit signature, withdrawal, or cash-out route.
+- Wallet authentication signs a domain/origin/nonce/expiry-bound message that explicitly authorizes no transaction.
+- Guest identities are random 32-byte public-key-shaped identifiers with expiring Redis sessions. They cannot sign a transaction.
+- The browser labels every balance, pot, rake result, and buy-in as simulated. Real xStock acquisition is not imitated by the beta.
+
+## Control-plane API
+
+All browser routes require an exact `Origin` in `ALLOWED_ORIGINS`. Authenticated routes use an opaque bearer token whose hash is stored in Redis.
+
+- `GET /v1/beta/lobby` — public rooms, authorized private rooms, ten demo assets, and the caller's profile.
+- `POST /v1/beta/demo-session` — issue a guest identity when safe-beta mode is enabled.
+- `POST /v1/beta/rooms` — create a private room with validated blinds, buy-ins, seats, rake, cap, clocks, and ROE rotation.
+- `POST /v1/beta/rooms/join` — join by a one-time-displayed invite code; PostgreSQL stores only SHA-256.
+- `POST /v1/beta/tables/join` — route a room and denomination to one preview table shard and seat the authenticated identity idempotently.
+- `GET /v1/beta/hands/:handId/audit` — for a seated identity, reverify the completed hand's drand round and return its reconstruction bundle and signed transcript head.
+
+The four bootstrapped public rooms are Opening Bell (NLH), Four Cards (PLO 4), and two ROE rooms. Their minimum demo buy-in is $20.
+
+## Dealer lifecycle
+
+The safe-beta dealer uses the same deterministic fair-deal and table engines as the production candidate:
+
+1. Freeze the active seat order and next deterministic hand id.
+2. Generate server and per-player entropy, persist the preparation in Redis, and commit every value to the signed PostgreSQL hand transcript.
+3. Reserve a future pinned drand Quicknet round. The round is unknown when all commitments are fixed.
+4. Fetch and BLS-verify that exact round, derive the deck, and publish its Merkle root before dealing.
+5. Encrypt each player's private cards and Merkle proofs to a fresh browser X25519 connection key with HKDF-SHA-256 and AES-256-GCM.
+6. Reveal community cards only in the committed deal order and attach a proof for each position.
+7. Reconstruct the deck at completion, derive showdown/rake results from it, and bind the result to the signed transcript head.
+8. Allow a seated player to retrieve the post-hand bundle; the endpoint re-fetches and verifies the pinned drand round before returning it.
+
+Redis locks serialize dealer progress across instances. PostgreSQL table and hand versions plus deterministic idempotency keys are the final concurrency boundary. Redis is not the table source of truth.
+
+The beta currently generates player entropy on the server before the future beacon. That still prevents choosing a desired deck after the beacon is known, but production real-value play remains gated on independently reviewed entropy custody, selective-abort monitoring, key isolation, and external certification.
+
+## Production-shaped deployment
+
+Required environment:
+
+```text
+NODE_ENV=production
+SAFE_BETA_MODE=enabled
+REAL_VALUE_MODE=disabled
+PUBLIC_ORIGIN=https://<frontend>
+ALLOWED_ORIGINS=https://<frontend>
+DATABASE_URL=postgresql://...?...sslmode=verify-full
+REDIS_URL=rediss://...
+SAFE_BETA_SIGNING_KEY_PEM=<Ed25519 private key secret>
+```
+
+Apply migrations before starting the service:
+
+```bash
+npm ci
+npm run migrate
+npm start
+```
+
+The service needs a long-lived process with WebSocket support; the static Vercel frontend is not that process. Use TLS PostgreSQL, TLS Redis, and a container host that supports long-lived WebSockets. Put the API behind HTTPS/WSS, set the frontend `xpoker-api-origin` meta value to the exact API origin, and keep both origins exact—never `*`.
+
+For a public beta, use at least two service instances, managed database backups, point-in-time recovery, Redis persistence appropriate for session recovery, metrics/alerts, log redaction, rate-limit monitoring, and a stable Ed25519 key from a secret manager. Free hosting tiers are suitable for testing availability, not for a production SLA.

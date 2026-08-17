@@ -10,6 +10,8 @@ import {
 } from "./redis-stores.js";
 import { AuthoritativeTableCoordinator } from "./table-coordinator.js";
 import { createTimeoutWorker } from "./timeout-worker.js";
+import { SafeBetaService } from "./safe-beta-service.js";
+import { createSafeBetaDealer } from "./safe-beta-dealer.js";
 
 function logError(logger, event, error, context = {}) {
   logger.error(JSON.stringify({
@@ -53,7 +55,7 @@ export async function createAuthoritativeRuntime({
   try {
     await pool.query("SELECT 1");
     const schema = await pool.query("SELECT name FROM schema_migrations ORDER BY name DESC LIMIT 1");
-    if (schema.rows[0]?.name !== "003_realtime_tables.sql") {
+    if (schema.rows[0]?.name !== "004_safe_beta.sql") {
       throw new Error("Database schema is not current; run npm run migrate");
     }
     if (!redis.isOpen) await redis.connect();
@@ -81,6 +83,24 @@ export async function createAuthoritativeRuntime({
       rateLimiter: new RedisRateLimiter(redis),
       sessionStore: new RedisSessionStore(redis),
     });
+    const safeBetaDealer = config.safeBetaMode ? createSafeBetaDealer({
+      pool,
+      redis,
+      tableCoordinator,
+      signingKeyPem: config.safeBetaSigningKeyPem,
+      nodeEnv: config.nodeEnv,
+      logger,
+    }) : undefined;
+    const unsubscribeSafeBetaDealer = safeBetaDealer
+      ? tableCoordinator.subscribe(safeBetaDealer.onTableEvent)
+      : undefined;
+    const safeBeta = config.safeBetaMode ? new SafeBetaService({
+      pool,
+      sessionStore: auth.sessionStore,
+      tableCoordinator,
+      dealer: safeBetaDealer,
+    }) : undefined;
+    if (safeBeta) await safeBeta.bootstrap();
 
     async function health() {
       await within(2_000, Promise.all([
@@ -99,7 +119,7 @@ export async function createAuthoritativeRuntime({
         tableCoordinator,
         allowedOrigins: config.allowedOrigins,
         subscribeToCoordinator: false,
-        getHoleCards,
+        getHoleCards: getHoleCards ?? safeBetaDealer?.getHoleCards,
       });
       await eventBus.start((event) => realtime.publish(event));
       timeoutWorker.start();
@@ -110,6 +130,8 @@ export async function createAuthoritativeRuntime({
     async function close() {
       if (closed) return;
       closed = true;
+      unsubscribeSafeBetaDealer?.();
+      await safeBetaDealer?.close();
       await timeoutWorker.stop();
       if (realtime) await realtime.close();
       await eventBus.close();
@@ -119,6 +141,8 @@ export async function createAuthoritativeRuntime({
 
     return Object.freeze({
       auth,
+      safeBeta,
+      safeBetaDealer,
       tableStore,
       tableCoordinator,
       timeoutWorker,

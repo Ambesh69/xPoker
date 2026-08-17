@@ -7,7 +7,7 @@ import { createRequestHandler } from "./http.js";
 import { evaluateReleaseGates } from "./release-gates.js";
 import { MemoryChallengeStore, encodeBase58 } from "./wallet-auth.js";
 
-async function request(config, path, { method = "GET", body, headers = {}, auth } = {}) {
+async function request(config, path, { method = "GET", body, headers = {}, auth, safeBeta } = {}) {
   const response = {
     status: undefined,
     headers: undefined,
@@ -21,7 +21,7 @@ async function request(config, path, { method = "GET", body, headers = {}, auth 
     },
   };
   const gates = evaluateReleaseGates({ config });
-  const handler = createRequestHandler({ config, gates, auth });
+  const handler = createRequestHandler({ config, gates, auth, safeBeta });
   const payload = body === undefined ? [] : [Buffer.from(JSON.stringify(body))];
   const incoming = Readable.from(payload);
   incoming.method = method;
@@ -163,4 +163,34 @@ test("wallet auth returns a bounded retry delay when Redis denies a request", as
   assert.equal(result.response.status, 429);
   assert.equal(result.response.headers["retry-after"], "13");
   assert.equal(result.body.error, "rate_limited");
+});
+
+test("safe-beta lobby is origin-bound and never claims funds move", async () => {
+  const result = await request(config(false), "/v1/beta/lobby", {
+    headers: { origin: "https://play.xpoker.example" },
+    safeBeta: {
+      lobby: async () => ({ mode: "safe-beta", fundsMove: false, rooms: [], assets: [] }),
+    },
+  });
+  assert.equal(result.response.status, 200);
+  assert.equal(result.body.fundsMove, false);
+  assert.equal(result.body.mode, "safe-beta");
+});
+
+test("safe-beta guest issuance is rate-limited before creating an identity", async () => {
+  let issued = false;
+  const result = await request(config(false), "/v1/beta/demo-session", {
+    method: "POST",
+    body: { displayName: "Fast Guest" },
+    headers: { origin: "https://play.xpoker.example" },
+    auth: {
+      rateLimiter: { consume: async () => ({ allowed: false, retryAfterMs: 4_100 }) },
+    },
+    safeBeta: {
+      issueGuest: async () => { issued = true; },
+    },
+  });
+  assert.equal(result.response.status, 429);
+  assert.equal(result.response.headers["retry-after"], "5");
+  assert.equal(issued, false);
 });

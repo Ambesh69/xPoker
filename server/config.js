@@ -15,17 +15,24 @@ export function loadConfig(env = process.env) {
   const nodeEnv = env.NODE_ENV ?? "development";
   if (!["development", "test", "production"].includes(nodeEnv)) throw new Error("Invalid NODE_ENV");
   const publicOrigin = new URL(env.PUBLIC_ORIGIN ?? "http://localhost:4173").origin;
+  const realValueMode = env.REAL_VALUE_MODE === "enabled";
+  const safeBetaMode = !realValueMode && (
+    env.SAFE_BETA_MODE === "enabled"
+    || (nodeEnv !== "production" && env.SAFE_BETA_MODE !== "disabled")
+  );
   return Object.freeze({
     nodeEnv,
     host: env.HOST ?? "127.0.0.1",
     port: integer(env.PORT, 8787, { minimum: 1, maximum: 65_535, label: "PORT" }),
     publicOrigin,
     allowedOrigins: origins(env.ALLOWED_ORIGINS ?? publicOrigin),
-    realValueMode: env.REAL_VALUE_MODE === "enabled",
+    realValueMode,
+    safeBetaMode,
     databaseUrl: env.DATABASE_URL,
     redisUrl: env.REDIS_URL,
     dealerKeyProvider: env.DEALER_KEY_PROVIDER,
     dealerSigningKeyPem: env.DEALER_SIGNING_KEY_PEM,
+    safeBetaSigningKeyPem: env.SAFE_BETA_SIGNING_KEY_PEM,
     solanaRpcUrl: env.SOLANA_RPC_URL,
     settlementCluster: env.SETTLEMENT_CLUSTER,
     settlementProgramId: env.SETTLEMENT_PROGRAM_ID,
