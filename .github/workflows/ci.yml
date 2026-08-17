@@ -70,8 +70,34 @@ jobs:
       - name: Build deployable Solana SBF artifact
         working-directory: settlement
         run: anchor build --ignore-keys
-      - name: Execute SBF entrypoint in a local validator
-        run: npm run smoke:contract-runtime
       - name: Report pinned artifact digest
         working-directory: settlement
         run: sha256sum target/deploy/xpoker_escrow.so
+      - name: Preserve deployable SBF artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: xpoker-escrow-sbf
+          path: settlement/target/deploy/xpoker_escrow.so
+          if-no-files-found: error
+
+  contract-runtime:
+    # Agave 3.1 requires io_uring on Linux. Keep the relaxed seccomp profile
+    # isolated from untrusted pull-request code and from the build job.
+    if: github.event_name != 'pull_request'
+    needs: contract
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    container:
+      image: solanafoundation/anchor:v1.0.0
+      options: --security-opt seccomp=unconfined
+    steps:
+      - uses: actions/checkout@v4
+      - name: Restore deployable SBF artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: xpoker-escrow-sbf
+          path: settlement/target/deploy
+      - name: Execute SBF entrypoint in a local validator
+        run: npm run smoke:contract-runtime
