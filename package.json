@@ -1,0 +1,13 @@
+{
+  "name": "xpoker",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --test",
+    "fairness:demo": "node fairness/demo.js"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

@@ -12,6 +12,27 @@ Then open `http://localhost:4173`.
 
 No build step or dependencies are required.
 
+## Fair-deal foundation
+
+The repository now includes a dependency-free cryptographic fair-deal protocol and test harness under `fairness/`. It provides:
+
+- 256-bit server and player seed commitments.
+- HKDF-SHA-256 hand-seed derivation with an external beacon input.
+- Deterministic Fisher–Yates shuffling with rejection sampling.
+- A pre-deal Merkle commitment covering all 52 card positions.
+- Position proofs for community-card reveals.
+- NLH, PLO 4 and run-it-twice dealing maps.
+- Post-hand audit bundles that detect altered seeds, rules, beacons and deck roots.
+
+Run it with:
+
+```bash
+npm test
+npm run fairness:demo
+```
+
+This is a protocol foundation, not authorization for real-value play. External beacon signature verification, attested key isolation, immutable commitments, independent audits and regulatory certification are still release gates. See [`docs/FAIR-DEAL-PROTOCOL.md`](docs/FAIR-DEAL-PROTOCOL.md).
+
 ## Included flows
 
 - Four permanent $20-minimum public tables: NLH, PLO 4, and two round-of-each tables.
