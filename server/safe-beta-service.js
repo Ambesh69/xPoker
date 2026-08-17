@@ -257,19 +257,26 @@ export class SafeBetaService {
       )`;
     }
     const result = await this.pool.query(
-      `SELECT room.id, room.owner_wallet, room.visibility, room.rules,
-              COUNT(DISTINCT session.id) AS tables,
-              COUNT(seat.wallet_address) FILTER (WHERE seat.status <> 'left') AS seats_taken
+      `SELECT room.id, room.owner_wallet, room.visibility, room.rules
          FROM rooms room
-         LEFT JOIN table_sessions session
-           ON session.room_id = room.id AND session.status = 'preview'
-         LEFT JOIN table_seats seat ON seat.table_session_id = session.id
         WHERE room.status = 'open'
           AND (room.id = ANY($1::uuid[]) OR ${privateFilter})
-        GROUP BY room.id
         ORDER BY room.visibility DESC, room.created_at ASC`,
       params,
     );
+    const roomIds = result.rows.map((room) => room.id);
+    const sessions = roomIds.length
+      ? await this.pool.query(
+        `SELECT id, room_id
+           FROM table_sessions
+          WHERE room_id = ANY($1::uuid[]) AND status = 'preview'`,
+        [roomIds],
+      )
+      : { rows: [] };
+    const liveTables = await Promise.all(sessions.rows.map(async (session) => ({
+      roomId: session.room_id,
+      state: await this.tableCoordinator.state(session.id),
+    })));
     const profile = wallet
       ? (await this.pool.query(
         "SELECT display_name, is_guest, demo_credit_atomic FROM safe_beta_profiles WHERE wallet_address = $1",
@@ -280,7 +287,14 @@ export class SafeBetaService {
       mode: "safe-beta",
       fundsMove: false,
       assets: SAFE_BETA_ASSETS,
-      rooms: result.rows.map(roomView),
+      rooms: result.rows.map((room) => {
+        const tables = liveTables.filter((table) => table.roomId === room.id && table.state.status !== "MISSING");
+        return roomView({
+          ...room,
+          tables: tables.length,
+          seats_taken: tables.reduce((count, table) => count + table.state.seats.length, 0),
+        });
+      }),
       profile: profile ? {
         wallet,
         displayName: profile.display_name,

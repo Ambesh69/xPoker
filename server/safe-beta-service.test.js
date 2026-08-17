@@ -4,6 +4,7 @@ import test from "node:test";
 import {
   SAFE_BETA_ASSETS,
   SAFE_BETA_PUBLIC_ROOMS,
+  SafeBetaService,
   normalizePrivateRoom,
 } from "./safe-beta-service.js";
 import { decodeBase58 } from "./wallet-auth.js";
@@ -44,4 +45,34 @@ test("private room validation rejects inverted buy-in limits", () => {
     () => normalizePrivateRoom({ name: "Bad limits", minimumBuyIn: 100, maximumBuyIn: 20 }),
     /maximum buy-in/i,
   );
+});
+
+test("lobby seat counts follow authoritative table state after players leave", async () => {
+  const room = SAFE_BETA_PUBLIC_ROOMS[0];
+  const pool = {
+    connect() {},
+    async query(sql) {
+      if (sql.includes("FROM rooms room")) return { rows: [{
+        id: room.id,
+        owner_wallet: null,
+        visibility: "public",
+        rules: { name: room.name, description: room.description, tableRules: room.tableRules },
+      }] };
+      if (sql.includes("FROM table_sessions")) return { rows: [
+        { id: "table-live", room_id: room.id },
+        { id: "table-empty", room_id: room.id },
+      ] };
+      throw new Error(`Unexpected query: ${sql}`);
+    },
+  };
+  const tableCoordinator = {
+    seatPlayer() {},
+    async state(tableId) {
+      return { status: "WAITING", seats: tableId === "table-live" ? [{ playerId: "still-seated" }] : [] };
+    },
+  };
+  const service = new SafeBetaService({ pool, sessionStore: { issue() {} }, tableCoordinator });
+  const result = await service.lobby();
+  assert.equal(result.rooms[0].tables, 2);
+  assert.equal(result.rooms[0].seatsTaken, 1);
 });
