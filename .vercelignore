@@ -1,0 +1,12 @@
+.git
+.github
+.vercel
+node_modules
+server
+db
+docs
+fairness
+settlement
+production
+Dockerfile
+railway.json
