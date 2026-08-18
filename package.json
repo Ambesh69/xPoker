@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "test": "node --test",
+    "test:certification": "node --test --test-concurrency=1 server/beta-acceptance.integration.test.js server/resilience-certification.integration.test.js server/safe-beta-dealer.test.js server/realtime.test.js server/table-coordinator.test.js",
     "test:beacon": "node server/beacon-smoke.js",
     "test:poker": "node --test server/poker/*.test.js",
     "test:settlement": "node --test server/settlement/*.test.js",

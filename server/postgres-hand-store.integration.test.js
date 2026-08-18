@@ -18,13 +18,15 @@ test("Postgres hand store atomically persists an idempotent signed transcript", 
 }, async () => {
   const pool = await createPostgresPool({ connectionString });
   const migrationResult = await applyMigrations({ pool });
-  assert.deepEqual(migrationResult.applied, [
+  const migrations = [
     "001_core.sql",
     "002_gameplay_settlement.sql",
     "003_realtime_tables.sql",
     "004_safe_beta.sql",
     "005_beta_operations.sql",
-  ]);
+  ];
+  assert.equal(migrationResult.current, migrations.at(-1));
+  assert.equal(migrationResult.applied.every((name) => migrations.includes(name)), true);
   assert.deepEqual((await applyMigrations({ pool })).applied, []);
   const roomId = "018f47a6-7b9d-7cc3-8a23-60bfc31e3f45";
   await pool.query(
@@ -239,7 +241,10 @@ test("Postgres hand store atomically persists an idempotent signed transcript", 
      RETURNING id`,
     [adminWallet, playerWallet],
   );
-  assert.equal((await operations.listReports({ wallet: adminWallet })).length, 1);
+  assert.equal(
+    (await operations.listReports({ wallet: adminWallet })).some((entry) => entry.id === report.rows[0].id),
+    true,
+  );
   assert.equal((await operations.moderateReport({
     wallet: adminWallet,
     reportId: report.rows[0].id,

@@ -63,9 +63,9 @@ The repository also contains a fail-closed backend candidate under `server/` and
 - Durable PostgreSQL and Redis adapters, checksum-locked migrations, hash-chained table events and append-only recovery snapshots.
 - Append-only hand events and a per-asset balanced atomic-unit ledger schema.
 - A separately signed release manifest that keeps real-value mode disabled until every audit, certification, infrastructure and regulatory gate is valid.
-- GitHub CI across Node 20/22 with live PostgreSQL 16 and Redis 7.4 integration tests.
+- GitHub CI across Node 20/22 with live PostgreSQL 16 and Redis 7.4 integration tests, plus a weekly zero-value acceptance/concurrency/failure-injection certification.
 
-Run deterministic checks with `npm test`, dependency checks with `npm run audit`, and a live verified beacon smoke test with `npm run test:beacon`. The current Vercel deployment remains a safe frontend preview; it is not an authoritative game server and no funds move. See [`docs/POKER-RULES-ENGINE.md`](docs/POKER-RULES-ENGINE.md), [`docs/REALTIME-PROTOCOL.md`](docs/REALTIME-PROTOCOL.md), [`docs/SETTLEMENT-PROTOCOL.md`](docs/SETTLEMENT-PROTOCOL.md), and [`docs/PRODUCTION-READINESS.md`](docs/PRODUCTION-READINESS.md).
+Run deterministic checks with `npm test`, the focused zero-value baseline with `npm run test:certification`, dependency checks with `npm run audit`, and a live verified beacon smoke test with `npm run test:beacon`. The current Vercel deployment remains a safe frontend preview; it is not an authoritative game server and no funds move. See [`docs/BETA-CERTIFICATION.md`](docs/BETA-CERTIFICATION.md), [`docs/POKER-RULES-ENGINE.md`](docs/POKER-RULES-ENGINE.md), [`docs/REALTIME-PROTOCOL.md`](docs/REALTIME-PROTOCOL.md), [`docs/SETTLEMENT-PROTOCOL.md`](docs/SETTLEMENT-PROTOCOL.md), and [`docs/PRODUCTION-READINESS.md`](docs/PRODUCTION-READINESS.md).
 
 The contract checks are `npm run test:contract`, `npm run build:contract`, and `npm run smoke:contract-runtime`; they require Rust, Solana CLI 3.x and Anchor CLI 1.0.0. CI runs all three in the official version-pinned Anchor 1.0.0 image.
 

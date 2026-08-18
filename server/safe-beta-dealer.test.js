@@ -144,3 +144,76 @@ test("safe-beta dealer commits a future beacon deck, privately deals, and settle
   assert.match(audit.transcriptHead, /^[0-9a-f]{64}$/);
   await dealer.close();
 });
+
+test("safe-beta dealer leaves the table waiting when the reserved beacon cannot be fetched", async () => {
+  const now = new Date("2026-08-17T12:00:00.000Z");
+  const clock = () => new Date(now);
+  const tableCoordinator = new AuthoritativeTableCoordinator({ store: new MemoryTableEventStore(), clock });
+  const dealerStore = new TestDealerStore();
+  const handCoordinator = new AuthoritativeHandCoordinator({
+    store: new MemoryHandEventStore(),
+    dealerStore,
+    signer: new TranscriptSigner(generateKeyPairSync("ed25519").privateKey),
+    beaconVerifier: async () => true,
+    clock,
+  });
+  const redis = new TestRedis();
+  const dealer = new SafeBetaDealer({
+    redis,
+    tableCoordinator,
+    handCoordinator,
+    dealerStore,
+    clock,
+    beaconReservation: async () => ({
+      source: DRAND_QUICKNET.source,
+      chainHash: DRAND_QUICKNET.chainHash,
+      round: 456,
+      notBefore: new Date(now.getTime() + 1).toISOString(),
+    }),
+    beaconFetch: async () => {
+      throw new Error("simulated beacon dependency outage");
+    },
+  });
+  const tableId = "20000000-0000-4000-8000-000000000011";
+  const roomId = "20000000-0000-4000-8000-000000000012";
+  const players = [wallet("outage-player-a"), wallet("outage-player-b")];
+  await tableCoordinator.createTable({
+    tableId,
+    roomId,
+    assetMint: wallet("outage-asset"),
+    allowlistVersion: "safe-beta-v1",
+    rules: {
+      game: "NLH",
+      seats: 2,
+      smallBlindAtomic: "10",
+      bigBlindAtomic: "20",
+      minimumBuyInAtomic: "2000",
+      maximumBuyInAtomic: "10000",
+      actionClockMs: 20_000,
+      timeBankMs: 60_000,
+    },
+    idempotencyKey: "safe-beta-outage-create",
+  });
+  for (let seat = 0; seat < players.length; seat += 1) {
+    await tableCoordinator.seatPlayer({
+      tableId,
+      playerId: players[seat],
+      seat,
+      buyInAtomic: "2000",
+      expectedVersion: seat + 1,
+      idempotencyKey: `safe-beta-outage-seat-${seat}`,
+    });
+  }
+
+  await assert.rejects(dealer.run(tableId), /simulated beacon dependency outage/);
+  const table = await tableCoordinator.state(tableId);
+  assert.equal(table.status, "WAITING");
+  assert.equal(table.version, 3);
+  assert.equal(table.currentHand, null);
+  const hand = await handCoordinator.state(`table:${tableId}:1`);
+  assert.equal(hand.status, "BEACON_RESERVED");
+  assert.equal(hand.deckRoot, undefined);
+  assert.equal(await dealerStore.get(`table:${tableId}:1`), undefined);
+  assert.equal(redis.values.size, 0);
+  await dealer.close();
+});

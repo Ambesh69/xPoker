@@ -105,6 +105,7 @@ This candidate is local/devnet-only. It has not been independently audited and i
 - Player suspension/bans and report decisions produce immutable append-only moderation events.
 - Five-minute public smoke checks open one deduplicated GitHub incident and close it automatically after recovery.
 - A scheduled monthly logical-backup drill restores into a clean PostgreSQL database and verifies current migrations, append-only triggers, transcript continuity, table chains, and ledger balance.
+- A disposable closed-beta certification signs generated wallets, enforces invitations, exercises NLH/PLO4/ROE and reconnect recovery, then runs 16 concurrent tables through retry, contention, Redis-fanout, and drand-outage injections.
 
 ## xStocks-specific invariants
 
@@ -123,7 +124,7 @@ The following are deliberately not represented as complete:
 5. xStocks integrator credentials and atomic RFQ integration.
 6. KYC/age, sanctions, geofencing, responsible-gaming limits, self-exclusion and jurisdiction-specific reporting.
 7. Independent application, cryptography and contract audits; penetration testing; RNG/game certification; and legal approval for each launch jurisdiction.
-8. Load/soak/chaos testing, disaster-recovery exercises, on-call ownership, DDoS protection and a public incident process.
+8. Sustained target-traffic soak and network/region chaos testing, quarterly recovery exercises, on-call ownership, DDoS protection and a public incident process. The repository's disposable concurrency and dependency-failure baseline is necessary but not a substitute for this prelaunch work.
 
 ## Operational acceptance targets
 
@@ -140,11 +141,12 @@ The following are deliberately not represented as complete:
 npm ci
 npm run migrate
 npm test
+npm run test:certification
 npm run audit
 npm run test:beacon
 ```
 
-`npm run test:beacon` performs a live signature-verified Quicknet fetch and is intentionally separate from deterministic CI tests. GitHub CI runs the unit tests plus real PostgreSQL 16 and Redis 7.4 adapter tests on Node 20 and Node 22.
+`npm run test:beacon` performs a live signature-verified Quicknet fetch and is intentionally separate from deterministic CI tests. GitHub CI runs the unit tests plus real PostgreSQL 16 and Redis 7.4 adapter tests on Node 20 and Node 22. The focused closed-beta suite and its limits are documented in [`BETA-CERTIFICATION.md`](BETA-CERTIFICATION.md).
 
 ## Safe-mode server
 
