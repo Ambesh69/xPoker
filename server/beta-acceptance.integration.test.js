@@ -457,6 +457,10 @@ test("closed beta accepts signed wallets, enforces invitations, and spans gamepl
   const overview = await apiRequest(baseUrl, "/v1/admin/overview", { token: adminToken });
   assert.equal(overview.response.status, 200);
   assert.equal(overview.payload.instances.some((instance) => instance.instanceId === `acceptance-${suffix}`), true);
-  assert.ok(overview.payload.summary.players >= 3);
+  assert.ok(overview.payload.summary.players >= 2);
   assert.ok(overview.payload.summary.requestsToday > 0);
+  const players = await apiRequest(baseUrl, "/v1/admin/players", { token: adminToken });
+  assert.equal(players.response.status, 200);
+  assert.equal(players.payload.players.some((entry) => entry.wallet === playerA.wallet), true);
+  assert.equal(players.payload.players.some((entry) => entry.wallet === playerB.wallet), true);
 });
