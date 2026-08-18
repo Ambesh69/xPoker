@@ -74,7 +74,7 @@ jobs:
         working-directory: settlement
         run: sha256sum target/deploy/xpoker_escrow.so
       - name: Preserve deployable SBF artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: xpoker-escrow-sbf
           path: settlement/target/deploy/xpoker_escrow.so
@@ -95,7 +95,7 @@ jobs:
     steps:
       - uses: actions/checkout@v6
       - name: Restore deployable SBF artifact
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v6
         with:
           name: xpoker-escrow-sbf
           path: settlement/target/deploy
