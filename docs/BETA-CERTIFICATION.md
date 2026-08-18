@@ -68,7 +68,7 @@ RUN_SOAK_CERTIFICATION=1 SOAK_DURATION_MS=30000 SOAK_TABLE_COUNT=16 \
 npm run test:soak
 ```
 
-The normal `npm test` run executes the E2E and bounded chaos files on every push in the Node 20/22 PostgreSQL 16 and Redis 7.4 matrix. `.github/workflows/beta-certification.yml` repeats the complete focused certification, including the 30-second soak, weekly and on manual dispatch.
+The normal `npm test` run executes the E2E and bounded chaos files on every push in the Node 20/22 PostgreSQL 16 and Redis 7.4 matrix. Test files run serially because the stateful integration scenarios intentionally share those PostgreSQL and Redis services while exercising leases and fault injection; concurrency and load are generated inside the dedicated load and soak tests. `.github/workflows/beta-certification.yml` repeats the complete focused certification, including the 30-second soak, weekly and on manual dispatch.
 
 ## Interpretation
 

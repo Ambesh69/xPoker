@@ -4,7 +4,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "test": "node --test",
+    "test": "node --test --test-concurrency=1",
     "test:certification": "node --test --test-concurrency=1 server/beta-acceptance.integration.test.js server/full-gameplay.integration.test.js server/chaos-certification.integration.test.js server/resilience-certification.integration.test.js server/soak-certification.integration.test.js server/safe-beta-dealer.test.js server/realtime.test.js server/table-coordinator.test.js",
     "test:soak": "node --test --test-concurrency=1 server/soak-certification.integration.test.js",
     "test:beacon": "node server/beacon-smoke.js",
