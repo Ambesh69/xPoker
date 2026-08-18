@@ -44,8 +44,8 @@ jobs:
       DATABASE_URL_TEST: postgresql://postgres:postgres@127.0.0.1:5432/xpoker
       REDIS_URL_TEST: redis://127.0.0.1:6379
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
         with:
           node-version: ${{ matrix.node }}
           cache: npm
@@ -58,7 +58,7 @@ jobs:
     timeout-minutes: 25
     container: solanafoundation/anchor:v1.0.0
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - name: Configure pinned Rust toolchain
         run: rustup toolchain install 1.97.1 --profile minimal --component rustfmt --component clippy && rustup default 1.97.1
       - name: Rust unit and cross-language vectors
@@ -93,7 +93,7 @@ jobs:
       image: solanafoundation/anchor:v1.0.0
       options: --security-opt seccomp=unconfined
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - name: Restore deployable SBF artifact
         uses: actions/download-artifact@v4
         with:
