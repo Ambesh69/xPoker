@@ -212,7 +212,7 @@ test("wallet-authenticated players complete NLH, PLO4, ROE, reconnect, timeout, 
       source: beacon.source,
       chainHash: beacon.chainHash,
       round: beacon.round,
-      notBefore: new Date(clock().getTime() - 1_000).toISOString(),
+      notBefore: new Date(clock().getTime() + 1).toISOString(),
     };
   };
   const fetchBeacon = async ({ reservation }) => {
