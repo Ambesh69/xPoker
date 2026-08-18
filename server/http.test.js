@@ -7,7 +7,7 @@ import { createRequestHandler } from "./http.js";
 import { evaluateReleaseGates } from "./release-gates.js";
 import { MemoryChallengeStore, encodeBase58 } from "./wallet-auth.js";
 
-async function request(config, path, { method = "GET", body, headers = {}, auth, safeBeta, operations } = {}) {
+async function request(config, path, { method = "GET", body, headers = {}, auth, safeBeta, operations, monitoring } = {}) {
   const response = {
     status: undefined,
     headers: undefined,
@@ -21,7 +21,7 @@ async function request(config, path, { method = "GET", body, headers = {}, auth,
     },
   };
   const gates = evaluateReleaseGates({ config });
-  const handler = createRequestHandler({ config, gates, auth, safeBeta, operations });
+  const handler = createRequestHandler({ config, gates, auth, safeBeta, operations, monitoring });
   const payload = body === undefined ? [] : [Buffer.from(JSON.stringify(body))];
   const incoming = Readable.from(payload);
   incoming.method = method;
@@ -31,7 +31,9 @@ async function request(config, path, { method = "GET", body, headers = {}, auth,
     ...headers,
   };
   await handler(incoming, response);
-  return { response, body: JSON.parse(response.payload) };
+  let parsed;
+  try { parsed = JSON.parse(response.payload); } catch { parsed = response.payload; }
+  return { response, body: parsed };
 }
 
 function config(realValueMode) {
@@ -79,6 +81,34 @@ test("readiness fails when authoritative dependencies are unavailable", async ()
   assert.equal(response.status, 503);
   assert.equal(body.authoritativeRuntime, "unavailable");
   assert.ok(body.failedGates.includes("authoritative_dependencies"));
+});
+
+test("operational health is public and metrics require a constant-time bearer check", async () => {
+  const value = { ...config(false), metricsBearerToken: "m".repeat(32) };
+  const monitoring = {
+    publicHealth: () => ({
+      status: "healthy",
+      checkedAt: "2026-08-19T00:00:00.000Z",
+      failed: [],
+      checks: { postgres: "healthy", redis: "healthy" },
+    }),
+    prometheus: () => "xpoker_uptime_seconds 42\n",
+  };
+  const health = await request(value, "/health/ops", { monitoring });
+  assert.equal(health.response.status, 200);
+  assert.equal(health.body.status, "healthy");
+  assert.deepEqual(health.body.failed, []);
+
+  const denied = await request(value, "/metrics", { monitoring });
+  assert.equal(denied.response.status, 401);
+  assert.equal(denied.response.headers["www-authenticate"], 'Bearer realm="xpoker-metrics"');
+  const metrics = await request(value, "/metrics", {
+    headers: { authorization: `Bearer ${"m".repeat(32)}` },
+    monitoring,
+  });
+  assert.equal(metrics.response.status, 200);
+  assert.equal(metrics.response.headers["content-type"], "text/plain; version=0.0.4; charset=utf-8");
+  assert.equal(metrics.body, "xpoker_uptime_seconds 42\n");
 });
 
 test("wallet challenge, signed verification, and bearer logout are origin-bound", async () => {

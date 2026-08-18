@@ -23,10 +23,11 @@ jobs:
           set -euo pipefail
           curl --fail --silent --show-error --retry 2 --max-time 15 https://xpoker.vercel.app/ >/dev/null
           curl --fail --silent --show-error --retry 2 --max-time 15 https://xpoker-api-production.up.railway.app/health/ready >ready.json
+          curl --fail --silent --show-error --retry 2 --max-time 15 https://xpoker-api-production.up.railway.app/health/ops >ops.json
           curl --fail --silent --show-error --retry 2 --max-time 15 \
             -H 'Origin: https://xpoker.vercel.app' \
             https://xpoker-api-production.up.railway.app/v1/beta/lobby >lobby.json
-          node -e 'const fs=require("fs");const ready=JSON.parse(fs.readFileSync("ready.json"));const lobby=JSON.parse(fs.readFileSync("lobby.json"));if(ready.status!=="ready"||ready.authoritativeRuntime!=="ready")throw new Error("API is not authoritative-ready");if(lobby.fundsMove!==false||lobby.assets?.length!==10||lobby.rooms?.length!==4)throw new Error("Safe-beta contract changed");'
+          node -e 'const fs=require("fs");const ready=JSON.parse(fs.readFileSync("ready.json"));const ops=JSON.parse(fs.readFileSync("ops.json"));const lobby=JSON.parse(fs.readFileSync("lobby.json"));if(ready.status!=="ready"||ready.authoritativeRuntime!=="ready")throw new Error("API is not authoritative-ready");if(ops.status!=="healthy"||ops.failed?.length)throw new Error(`Operational probes degraded: ${(ops.failed||[]).join(",")}`);if(lobby.fundsMove!==false||lobby.assets?.length!==10||lobby.rooms?.length!==4)throw new Error("Safe-beta contract changed");'
 
       - name: Open or update outage issue
         if: failure()
@@ -40,7 +41,7 @@ jobs:
               state: "open",
             });
             const existing = data.find((issue) => issue.title === title);
-            const body = `Production smoke checks failed at ${new Date().toISOString()}.\n\nRun: ${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
+            const body = `Production or operational-health checks failed at ${new Date().toISOString()}.\n\nRun: ${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}\n\nRunbook: ${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/blob/main/docs/INCIDENT-RESPONSE.md`;
             if (existing) {
               await github.rest.issues.createComment({ owner: context.repo.owner, repo: context.repo.repo, issue_number: existing.number, body });
             } else {

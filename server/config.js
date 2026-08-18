@@ -25,6 +25,20 @@ function origins(value) {
   return [...new Set(value.split(",").map((item) => new URL(item.trim()).origin))];
 }
 
+function optionalHttpsUrl(value, label) {
+  if (!value) return undefined;
+  const url = new URL(value);
+  if (url.protocol !== "https:") throw new Error(`${label} must use HTTPS`);
+  if (url.username || url.password) throw new Error(`${label} must not contain credentials`);
+  return url.href;
+}
+
+function optionalSecret(value, label) {
+  if (!value) return undefined;
+  if (value.length < 32 || value.length > 512) throw new Error(`${label} must be 32 to 512 characters`);
+  return value;
+}
+
 export function loadConfig(env = process.env) {
   const nodeEnv = env.NODE_ENV ?? "development";
   if (!["development", "test", "production"].includes(nodeEnv)) throw new Error("Invalid NODE_ENV");
@@ -60,6 +74,69 @@ export function loadConfig(env = process.env) {
     geofencingProvider: env.GEOFENCING_PROVIDER,
     identityProvider: env.IDENTITY_PROVIDER,
     monitoringDsn: env.MONITORING_DSN,
+    alertWebhookUrl: optionalHttpsUrl(env.ALERT_WEBHOOK_URL, "ALERT_WEBHOOK_URL"),
+    alertWebhookToken: optionalSecret(env.ALERT_WEBHOOK_TOKEN, "ALERT_WEBHOOK_TOKEN"),
+    metricsBearerToken: optionalSecret(env.METRICS_BEARER_TOKEN, "METRICS_BEARER_TOKEN"),
+    monitorIntervalMs: integer(env.MONITOR_INTERVAL_MS, 15_000, {
+      minimum: 5_000,
+      maximum: 300_000,
+      label: "MONITOR_INTERVAL_MS",
+    }),
+    monitorProbeTimeoutMs: integer(env.MONITOR_PROBE_TIMEOUT_MS, 2_000, {
+      minimum: 250,
+      maximum: 10_000,
+      label: "MONITOR_PROBE_TIMEOUT_MS",
+    }),
+    alertCooldownMs: integer(env.ALERT_COOLDOWN_MS, 300_000, {
+      minimum: 60_000,
+      maximum: 86_400_000,
+      label: "ALERT_COOLDOWN_MS",
+    }),
+    monitorOverdueGraceMs: integer(env.MONITOR_OVERDUE_GRACE_MS, 30_000, {
+      minimum: 5_000,
+      maximum: 300_000,
+      label: "MONITOR_OVERDUE_GRACE_MS",
+    }),
+    monitorStalledTableMs: integer(env.MONITOR_STALLED_TABLE_MS, 120_000, {
+      minimum: 60_000,
+      maximum: 3_600_000,
+      label: "MONITOR_STALLED_TABLE_MS",
+    }),
+    monitorStalledBeaconMs: integer(env.MONITOR_STALLED_BEACON_MS, 60_000, {
+      minimum: 15_000,
+      maximum: 900_000,
+      label: "MONITOR_STALLED_BEACON_MS",
+    }),
+    monitorDatabaseLatencyMs: integer(env.MONITOR_DATABASE_LATENCY_MS, 1_000, {
+      minimum: 100,
+      maximum: 10_000,
+      label: "MONITOR_DATABASE_LATENCY_MS",
+    }),
+    monitorRedisLatencyMs: integer(env.MONITOR_REDIS_LATENCY_MS, 500, {
+      minimum: 50,
+      maximum: 10_000,
+      label: "MONITOR_REDIS_LATENCY_MS",
+    }),
+    monitorPoolWaitingLimit: integer(env.MONITOR_POOL_WAITING_LIMIT, 10, {
+      minimum: 1,
+      maximum: 1_000,
+      label: "MONITOR_POOL_WAITING_LIMIT",
+    }),
+    monitorMinimumRequests: integer(env.MONITOR_MINIMUM_REQUESTS, 20, {
+      minimum: 5,
+      maximum: 100_000,
+      label: "MONITOR_MINIMUM_REQUESTS",
+    }),
+    monitorHttpErrorRate: integer(env.MONITOR_HTTP_ERROR_RATE_BPS, 500, {
+      minimum: 1,
+      maximum: 10_000,
+      label: "MONITOR_HTTP_ERROR_RATE_BPS",
+    }) / 10_000,
+    monitorRealtimeDisconnectRate: integer(env.MONITOR_REALTIME_DISCONNECT_RATE_BPS, 5_000, {
+      minimum: 1,
+      maximum: 10_000,
+      label: "MONITOR_REALTIME_DISCONNECT_RATE_BPS",
+    }) / 10_000,
     assetAllowlistVersion: env.ASSET_ALLOWLIST_VERSION,
     buildCommit: env.BUILD_COMMIT,
     releaseManifestPath: env.RELEASE_MANIFEST_PATH,

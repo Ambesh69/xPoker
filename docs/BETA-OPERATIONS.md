@@ -12,13 +12,15 @@ Keep `BETA_INVITE_REQUIRED=disabled` while onboarding the first admin. Create at
 
 ## Monitoring and alerting
 
-Every API replica writes a Redis heartbeat with a 45-second TTL and increments daily request, status-class, route, and duration counters. The dashboard calculates request count, mean latency, and 5xx rate from those counters. Runtime errors become deduplicated PostgreSQL incidents; sensitive context keys and oversized values are removed before persistence.
+Every API replica writes a Redis heartbeat with a 45-second TTL and increments daily request, status-class, route, and duration counters. It also runs operational probes for PostgreSQL/Redis health and latency, pool pressure, overdue action clocks, stalled active tables and stalled drand reservations. Rolling HTTP error and WebSocket-disconnect thresholds require a minimum sample size. The Pit Board shows the resulting health checks and replica-local live metrics.
 
-`.github/workflows/uptime.yml` checks the frontend, authoritative readiness, four-room lobby contract, ten-asset allowlist, and `fundsMove: false` every five minutes. Failure opens or updates one GitHub issue named `[ops] Production uptime alert`; recovery comments on and closes it. GitHub Actions schedules can be delayed, so this is a baseline monitor rather than an SLA-grade paging provider.
+Runtime failures and failed probes become deduplicated PostgreSQL incidents; sensitive context keys and oversized values are removed before persistence or delivery. Probe recovery automatically resolves only `monitor_` incidents. A protected Prometheus-compatible `/metrics` endpoint is enabled by `METRICS_BEARER_TOKEN`. An optional HTTPS receiver configured with `ALERT_WEBHOOK_URL` receives cross-replica-deduplicated firing and resolved events.
+
+`.github/workflows/uptime.yml` checks the frontend, authoritative readiness, operational health, four-room lobby contract, ten-asset allowlist, and `fundsMove: false` every five minutes. Failure opens or updates one GitHub issue named `[ops] Production uptime alert`; recovery comments on and closes it. GitHub Actions schedules can be delayed, so this is a baseline monitor rather than an SLA-grade paging provider. The complete triage and recovery process is in [`INCIDENT-RESPONSE.md`](INCIDENT-RESPONSE.md).
 
 Triage order:
 
-1. Check `/health/ready`; a 503 means a dependency or release gate is unavailable.
+1. Check `/health/ready` and `/health/ops`; a 503 identifies dependency/release blocking or an operational probe failure.
 2. Check Railway deployment and PostgreSQL/Redis health.
 3. Open the Pit Board and compare live heartbeats, 5xx rate, latency, and incident fingerprints.
 4. Resolve an incident only after recovery; another occurrence reopens it automatically.

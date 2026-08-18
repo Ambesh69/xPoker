@@ -24,3 +24,25 @@ test("operations configuration rejects malformed admin wallets", () => {
     /ADMIN_WALLETS/,
   );
 });
+
+test("monitoring configuration requires HTTPS endpoints and long bearer secrets", () => {
+  const config = loadConfig({
+    NODE_ENV: "production",
+    PUBLIC_ORIGIN: "https://xpoker.vercel.app",
+    ALERT_WEBHOOK_URL: "https://alerts.example/xpoker",
+    ALERT_WEBHOOK_TOKEN: "a".repeat(32),
+    METRICS_BEARER_TOKEN: "m".repeat(32),
+    MONITOR_HTTP_ERROR_RATE_BPS: "250",
+  });
+  assert.equal(config.alertWebhookUrl, "https://alerts.example/xpoker");
+  assert.equal(config.monitorHttpErrorRate, 0.025);
+  assert.equal(config.monitorIntervalMs, 15_000);
+  assert.throws(
+    () => loadConfig({ ALERT_WEBHOOK_URL: "http://alerts.example/xpoker" }),
+    /HTTPS/,
+  );
+  assert.throws(
+    () => loadConfig({ METRICS_BEARER_TOKEN: "short" }),
+    /32 to 512/,
+  );
+});

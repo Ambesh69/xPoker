@@ -1,6 +1,6 @@
 import { readFile } from "node:fs/promises";
 import { createServer } from "node:http";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID, timingSafeEqual } from "node:crypto";
 
 import { loadConfig } from "./config.js";
 import { evaluateReleaseGates } from "./release-gates.js";
@@ -32,6 +32,25 @@ function sendJson(response, statusCode, body, requestId, extraHeaders = {}) {
   response.end(`${JSON.stringify(body)}\n`);
 }
 
+function sendText(response, statusCode, body, requestId, extraHeaders = {}) {
+  response.writeHead(statusCode, {
+    ...SECURITY_HEADERS,
+    "content-type": "text/plain; version=0.0.4; charset=utf-8",
+    "x-request-id": requestId,
+    ...extraHeaders,
+  });
+  response.end(body);
+}
+
+function metricsAuthorized(request, expectedToken) {
+  if (!expectedToken) return false;
+  const authorization = request.headers.authorization;
+  if (typeof authorization !== "string" || !authorization.startsWith("Bearer ")) return false;
+  const supplied = createHash("sha256").update(authorization.slice(7)).digest();
+  const expected = createHash("sha256").update(expectedToken).digest();
+  return timingSafeEqual(supplied, expected);
+}
+
 function authCors(config, request) {
   const origin = request.headers.origin;
   if (typeof origin !== "string") return undefined;
@@ -59,7 +78,7 @@ async function authenticatedWallet(auth, request) {
   return session.wallet;
 }
 
-async function handleSafeBeta({ request, response, requestId, url, config, auth, safeBeta, operations }) {
+async function handleSafeBeta({ request, response, requestId, url, config, auth, safeBeta, operations, monitoring }) {
   const cors = authCors(config, request);
   if (!cors) {
     sendJson(response, 403, { error: "origin_forbidden", requestId }, requestId);
@@ -187,11 +206,16 @@ async function handleSafeBeta({ request, response, requestId, url, config, auth,
       error: error instanceof Error ? error.message : String(error),
       };
       console.error(JSON.stringify(context));
-      operations?.recordIncident({
-        category: "safe_beta_http_failed",
+      const category = /\/audit(?:\/download)?$/.test(url.pathname)
+        ? "proof_download_failed"
+        : "safe_beta_http_failed";
+      const incident = {
+        category,
         message: context.error,
         context: { requestId, method: request.method, path: url.pathname },
-      }).catch(() => {});
+      };
+      if (monitoring) monitoring.capture(incident).catch(() => {});
+      else operations?.recordIncident(incident).catch(() => {});
     }
     sendJson(response, statusCode, {
       error: expected ? error?.code ?? "invalid_request" : "internal_error",
@@ -201,7 +225,7 @@ async function handleSafeBeta({ request, response, requestId, url, config, auth,
   }
 }
 
-async function handleAdmin({ request, response, requestId, url, config, auth, operations }) {
+async function handleAdmin({ request, response, requestId, url, config, auth, operations, monitoring }) {
   const cors = authCors(config, request);
   if (!cors) {
     sendJson(response, 403, { error: "origin_forbidden", requestId }, requestId);
@@ -233,7 +257,11 @@ async function handleAdmin({ request, response, requestId, url, config, auth, op
       }
     }
     if (url.pathname === "/v1/admin/overview" && request.method === "GET") {
-      sendJson(response, 200, { ...(await operations.overview(wallet)), requestId }, requestId, cors);
+      sendJson(response, 200, {
+        ...(await operations.overview(wallet)),
+        monitoring: monitoring?.snapshot() ?? null,
+        requestId,
+      }, requestId, cors);
       return;
     }
     if (url.pathname === "/v1/admin/invites" && request.method === "GET") {
@@ -279,11 +307,15 @@ async function handleAdmin({ request, response, requestId, url, config, auth, op
   } catch (error) {
     const expected = Number.isInteger(error?.statusCode);
     const statusCode = expected ? error.statusCode : 500;
-    if (!expected) operations.recordIncident({
-      category: "admin_http_failed",
-      message: error instanceof Error ? error.message : String(error),
-      context: { requestId, method: request.method, path: url.pathname },
-    }).catch(() => {});
+    if (!expected) {
+      const incident = {
+        category: "admin_http_failed",
+        message: error instanceof Error ? error.message : String(error),
+        context: { requestId, method: request.method, path: url.pathname },
+      };
+      if (monitoring) monitoring.capture(incident).catch(() => {});
+      else operations.recordIncident(incident).catch(() => {});
+    }
     sendJson(response, statusCode, {
       error: expected ? error.code ?? "invalid_request" : "internal_error",
       message: expected && error instanceof Error ? error.message : "Operations request failed",
@@ -445,30 +477,32 @@ async function handleAuth({ request, response, requestId, url, config, auth }) {
   sendJson(response, 404, { error: "not_found", requestId }, requestId, cors);
 }
 
-export function createRequestHandler({ config, gates, auth, safeBeta, operations, healthCheck }) {
+export function createRequestHandler({ config, gates, auth, safeBeta, operations, monitoring, healthCheck }) {
   return async (request, response) => {
     const startedAt = performance.now();
     const suppliedRequestId = request.headers["x-request-id"];
     const requestId = typeof suppliedRequestId === "string" ? suppliedRequestId.slice(0, 128) : randomUUID();
     const url = new URL(request.url, "http://internal");
     response.once?.("finish", () => {
-      operations?.recordRequest({
+      const requestMetric = {
         method: request.method,
         path: url.pathname,
         statusCode: response.statusCode,
         durationMs: performance.now() - startedAt,
-      }).catch(() => {});
+      };
+      operations?.recordRequest(requestMetric).catch(() => {});
+      monitoring?.observeHttpRequest(requestMetric);
     });
     if (url.pathname.startsWith("/v1/auth/") && !url.search) {
       await handleAuth({ request, response, requestId, url, config, auth });
       return;
     }
     if (url.pathname.startsWith("/v1/beta/")) {
-      await handleSafeBeta({ request, response, requestId, url, config, auth, safeBeta, operations });
+      await handleSafeBeta({ request, response, requestId, url, config, auth, safeBeta, operations, monitoring });
       return;
     }
     if (url.pathname.startsWith("/v1/admin/")) {
-      await handleAdmin({ request, response, requestId, url, config, auth, operations });
+      await handleAdmin({ request, response, requestId, url, config, auth, operations, monitoring });
       return;
     }
     if (request.method !== "GET") {
@@ -498,6 +532,30 @@ export function createRequestHandler({ config, gates, auth, safeBeta, operations
       }, requestId);
       return;
     }
+    if (url.pathname === "/health/ops") {
+      const result = monitoring?.publicHealth() ?? {
+        status: "disabled",
+        checkedAt: null,
+        failed: ["monitoring_unavailable"],
+        checks: {},
+      };
+      sendJson(response, result.status === "healthy" ? 200 : 503, { ...result, requestId }, requestId);
+      return;
+    }
+    if (url.pathname === "/metrics") {
+      if (!monitoring || !config.metricsBearerToken) {
+        sendJson(response, 404, { error: "not_found", requestId }, requestId);
+        return;
+      }
+      if (!metricsAuthorized(request, config.metricsBearerToken)) {
+        sendJson(response, 401, { error: "authentication_required", requestId }, requestId, {
+          "www-authenticate": 'Bearer realm="xpoker-metrics"',
+        });
+        return;
+      }
+      sendText(response, 200, monitoring.prometheus(), requestId);
+      return;
+    }
     if (url.pathname === "/v1/release/status") {
       sendJson(response, 200, {
         realValueRequested: gates.realValueRequested,
@@ -511,10 +569,10 @@ export function createRequestHandler({ config, gates, auth, safeBeta, operations
   };
 }
 
-export async function createApiServer({ config = loadConfig(), manifest, auth, safeBeta, operations, healthCheck } = {}) {
+export async function createApiServer({ config = loadConfig(), manifest, auth, safeBeta, operations, monitoring, healthCheck } = {}) {
   const releaseManifest = manifest ?? await readManifest(config.releaseManifestPath);
   const gates = evaluateReleaseGates({ config, manifest: releaseManifest });
-  const server = createServer(createRequestHandler({ config, gates, auth, safeBeta, operations, healthCheck }));
+  const server = createServer(createRequestHandler({ config, gates, auth, safeBeta, operations, monitoring, healthCheck }));
   server.releaseGates = gates;
   return server;
 }
@@ -529,6 +587,7 @@ export async function startApiServer({ config = loadConfig(), runtimeFactory = c
     auth: runtime?.auth,
     safeBeta: runtime?.safeBeta,
     operations: runtime?.operations,
+    monitoring: runtime?.monitoring,
     healthCheck: runtime?.health,
   });
   try {

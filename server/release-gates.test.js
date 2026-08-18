@@ -76,3 +76,12 @@ test("one missing or expired control keeps real-value mode closed", () => {
   assert.ok(result.failed.includes("cryptography_audit"));
   assert.ok(result.failed.includes("release_manifest_signature"));
 });
+
+test("a configured HTTPS alert receiver satisfies the monitoring integration gate", () => {
+  const fixture = productionFixture();
+  delete fixture.config.monitoringDsn;
+  fixture.config.alertWebhookUrl = "https://alerts.example/xpoker";
+  const result = evaluateReleaseGates({ ...fixture, now: new Date("2026-08-17T00:00:00.000Z") });
+  assert.equal(result.checks.find((check) => check.name === "monitoring_configured").passed, true);
+  assert.equal(result.realValueEnabled, true);
+});

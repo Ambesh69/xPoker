@@ -113,6 +113,7 @@ test("authenticated realtime clients receive reconnect snapshots, ordered events
       return { playerId: playerA, wallet: playerA, expiresAt: "2026-08-17T13:00:00.000Z" };
     },
   };
+  const telemetry = [];
   const realtime = attachRealtimeServer({
     server: http,
     sessionStore: sessions,
@@ -120,6 +121,7 @@ test("authenticated realtime clients receive reconnect snapshots, ordered events
     allowedOrigins: [ORIGIN],
     clock: () => new Date("2026-08-17T12:00:00.000Z"),
     heartbeatMs: 60_000,
+    onTelemetry: (event) => telemetry.push(event),
   });
   context.after(async () => {
     await realtime.close();
@@ -197,6 +199,14 @@ test("authenticated realtime clients receive reconnect snapshots, ordered events
   assert.equal(resumed.events[0].type, "PLAYER_SAT_OUT");
   reconnect.close();
   await new Promise((resolve) => reconnect.once("close", resolve));
+  for (let attempt = 0; attempt < 20 && telemetry.filter((event) => event.event === "connection_closed").length < 2; attempt += 1) {
+    await new Promise((resolve) => setTimeout(resolve, 5));
+  }
+  assert.equal(telemetry.filter((event) => event.event === "connection_opened").length, 2);
+  assert.equal(telemetry.filter((event) => event.event === "authenticated").length, 2);
+  assert.equal(telemetry.filter((event) => event.event === "subscribed").length, 2);
+  assert.equal(telemetry.filter((event) => event.event === "command_applied").length, 1);
+  assert.equal(telemetry.filter((event) => event.event === "connection_closed").length, 2);
 });
 
 test("realtime transport rejects cross-origin upgrades and invalid sessions", async (context) => {

@@ -24,7 +24,7 @@ npm run migrate
 npm start
 ```
 
-Then serve the frontend at `PUBLIC_ORIGIN`. See [`docs/SAFE-BETA.md`](docs/SAFE-BETA.md) for the API, fairness lifecycle, security boundary, and deployment requirements, and [`docs/BETA-OPERATIONS.md`](docs/BETA-OPERATIONS.md) for alerts, backups, restore drills, replicas, and moderation.
+Then serve the frontend at `PUBLIC_ORIGIN`. See [`docs/SAFE-BETA.md`](docs/SAFE-BETA.md) for the API, fairness lifecycle, security boundary, and deployment requirements, [`docs/BETA-OPERATIONS.md`](docs/BETA-OPERATIONS.md) for alerts, backups, restore drills, replicas, and moderation, and [`docs/INCIDENT-RESPONSE.md`](docs/INCIDENT-RESPONSE.md) for operational triage and recovery.
 
 ## Fair-deal foundation
 

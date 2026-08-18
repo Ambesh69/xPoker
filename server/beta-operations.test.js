@@ -5,6 +5,8 @@ import { metricRoute, redact } from "./beta-operations.js";
 
 test("operations metrics keep bounded route cardinality", () => {
   assert.equal(metricRoute("/health/ready"), "/health/ready");
+  assert.equal(metricRoute("/health/ops"), "/health/ops");
+  assert.equal(metricRoute("/metrics"), "/metrics");
   assert.equal(
     metricRoute("/v1/beta/hands/table:00000000-0000-4000-8000-000000000001:1/audit/download"),
     "/v1/beta/hands/:hand/audit",

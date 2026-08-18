@@ -25,6 +25,7 @@ export function createTimeoutWorker({
   leaseMs = 10_000,
   batchSize = 50,
   onError = () => {},
+  onResult = () => {},
 } = {}) {
   assert(store?.claimExpiredDeadlines, "A timeout lease store is required");
   assert(coordinator?.timeout && coordinator?.state, "A table coordinator is required");
@@ -33,6 +34,7 @@ export function createTimeoutWorker({
   assert(Number.isInteger(leaseMs) && leaseMs >= 1_000 && leaseMs <= 60_000, "Timeout lease is invalid");
   assert(Number.isInteger(batchSize) && batchSize >= 1 && batchSize <= 500, "Timeout batch size is invalid");
   assert(typeof onError === "function", "Timeout error handler must be a function");
+  assert(typeof onResult === "function", "Timeout result handler must be a function");
 
   let interval;
   let activeRun;
@@ -69,7 +71,9 @@ export function createTimeoutWorker({
           if (!staleLease(error)) onError(error, lease);
         }
       }
-      return { claimed: leases.length, applied };
+      const result = { claimed: leases.length, applied };
+      onResult(result);
+      return result;
     })();
     try {
       return await activeRun;

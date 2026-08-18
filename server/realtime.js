@@ -61,6 +61,7 @@ export function attachRealtimeServer({
   rateWindowMs = 10_000,
   maxMessagesPerWindow = 40,
   subscribeToCoordinator = true,
+  onTelemetry = () => {},
   clock = () => new Date(),
 } = {}) {
   assert(server?.on, "HTTP server is required");
@@ -69,6 +70,7 @@ export function attachRealtimeServer({
   assert(Array.isArray(allowedOrigins) && allowedOrigins.length > 0, "At least one realtime origin is required");
   assert(typeof subscribeToCoordinator === "boolean", "Realtime event source setting is invalid");
   assert(getHoleCards === undefined || typeof getHoleCards === "function", "Private-card provider is invalid");
+  assert(typeof onTelemetry === "function", "Realtime telemetry handler is invalid");
   const origins = new Set(allowedOrigins.map((origin) => new URL(origin).origin));
   const clients = new Map();
   const subscriptions = new Map();
@@ -79,6 +81,10 @@ export function attachRealtimeServer({
     perMessageDeflate: false,
     handleProtocols: (protocols) => (protocols.has(PROTOCOL) ? PROTOCOL : false),
   });
+
+  function telemetry(event, context = {}) {
+    try { onTelemetry({ event, ...context }); } catch {}
+  }
 
   function unsubscribe(socket) {
     const metadata = clients.get(socket);
@@ -234,6 +240,7 @@ export function attachRealtimeServer({
   }
 
   webSockets.on("connection", (socket) => {
+    telemetry("connection_opened");
     const metadata = {
       wallet: null,
       authenticated: false,
@@ -254,11 +261,12 @@ export function attachRealtimeServer({
     send(socket, { type: "hello", protocol: PROTOCOL, authenticationRequired: true });
 
     socket.on("pong", () => { metadata.alive = true; });
-    socket.on("close", () => {
+    socket.on("close", (code) => {
       clearTimeout(authenticationTimer);
+      telemetry("connection_closed", { code });
       unsubscribe(socket);
     });
-    socket.on("error", () => {});
+    socket.on("error", () => telemetry("socket_error"));
     socket.on("message", (data, isBinary) => {
       metadata.messageQueue = metadata.messageQueue.then(async () => {
         let message;
@@ -283,21 +291,30 @@ export function attachRealtimeServer({
             assert(message.type === "authenticate", "Authenticate before sending commands");
             const session = await sessionStore.authenticate(message.token);
             if (!session || Date.parse(session.expiresAt) <= now) {
+              telemetry("authentication_failed");
               socket.close(4401, "authentication failed");
               return;
             }
             metadata.wallet = session.wallet;
             metadata.authenticated = true;
             clearTimeout(authenticationTimer);
+            telemetry("authenticated");
             send(socket, { type: "authenticated", requestId: id, wallet: session.wallet, expiresAt: session.expiresAt });
             return;
           }
 
-          if (message.type === "subscribe") await subscribe(socket, metadata, message);
+          if (message.type === "subscribe") {
+            await subscribe(socket, metadata, message);
+            telemetry("subscribed");
+          }
           else if (message.type === "key_exchange") await establishHoleCardKey(socket, metadata, message);
-          else if (message.type === "command") await command(socket, metadata, message);
+          else if (message.type === "command") {
+            await command(socket, metadata, message);
+            telemetry("command_applied");
+          }
           else throw new Error("Unsupported realtime message type");
         } catch (error) {
+          telemetry("command_failed");
           send(socket, {
             type: "error",
             requestId: typeof message?.requestId === "string" ? message.requestId : undefined,
@@ -339,6 +356,7 @@ export function attachRealtimeServer({
     for (const socket of webSockets.clients) {
       const metadata = clients.get(socket);
       if (!metadata?.alive) {
+        telemetry("heartbeat_terminated");
         socket.terminate();
         continue;
       }

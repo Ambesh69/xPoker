@@ -11,6 +11,8 @@ const SECRET_KEY = /authorization|cookie|password|secret|seed|signature|token|pr
 const STATIC_METRIC_ROUTES = new Set([
   "/health/live",
   "/health/ready",
+  "/health/ops",
+  "/metrics",
   "/v1/release/status",
   "/v1/auth/challenge",
   "/v1/auth/verify",
@@ -217,7 +219,7 @@ export class BetaOperationsService {
     const safeMessage = String(message || "Unknown runtime error").trim().replace(/\s+/g, " ").slice(0, 1000) || "Unknown runtime error";
     if (!INCIDENT_SEVERITIES.has(severity)) severity = "error";
     const fingerprint = sha256(`${safeCategory}:${safeMessage}`);
-    await this.pool.query(
+    const result = await this.pool.query(
       `INSERT INTO operations_incidents (fingerprint, category, severity, message, context)
        VALUES ($1, $2, $3, $4, $5)
        ON CONFLICT (fingerprint) DO UPDATE
@@ -227,9 +229,31 @@ export class BetaOperationsService {
              status = 'open',
              occurrences = operations_incidents.occurrences + 1,
              last_seen_at = now(),
-             resolved_at = NULL`,
+             resolved_at = NULL
+       RETURNING id, occurrences, first_seen_at, last_seen_at`,
       [fingerprint, safeCategory, severity, safeMessage, redact(context)],
     );
+    const row = result.rows[0];
+    return {
+      id: row.id,
+      occurrences: Number(row.occurrences),
+      firstSeenAt: new Date(row.first_seen_at).toISOString(),
+      lastSeenAt: new Date(row.last_seen_at).toISOString(),
+    };
+  }
+
+  async resolveAutomatedIncidents({ category }) {
+    if (!/^monitor_[a-z0-9_]{3,64}$/.test(category)) {
+      throw new Error("Automated incident category is invalid");
+    }
+    const result = await this.pool.query(
+      `UPDATE operations_incidents
+          SET status = 'resolved', resolved_at = now()
+        WHERE category = $1 AND status = 'open'
+        RETURNING id`,
+      [category],
+    );
+    return { resolved: result.rowCount };
   }
 
   async #instances() {

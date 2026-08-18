@@ -2609,6 +2609,32 @@ a:focus-visible {
 .pulse-instances { flex-wrap: wrap; gap: 7px; border-right: 0; font-family: var(--mono); font-size: 9px; }
 .pulse-instances span { display: inline-flex; align-items: center; gap: 5px; padding: 6px 8px; border: 1px solid rgba(255,255,255,.13); border-radius: 8px; background: rgba(255,255,255,.06); }
 .pulse-instances i { width: 6px; height: 6px; border-radius: 50%; background: var(--mint); }
+.pulse-alert .pulse-mark { background: #ffc7c5; box-shadow: 0 0 0 7px rgba(255, 199, 197, 0.1); }
+
+.monitor-panel {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+  margin-bottom: 18px;
+  padding: 15px 17px;
+  border: 1px solid #bfd0c2;
+  border-radius: 16px;
+  background: #f3f9ee;
+}
+
+.monitor-warning { border-color: #e1b4b1; background: #fff2f1; }
+.monitor-copy { min-width: 230px; }
+.monitor-copy span,
+.monitor-copy strong,
+.monitor-copy small { display: block; }
+.monitor-copy strong { margin-top: 4px; font-size: 13px; }
+.monitor-copy small { margin-top: 5px; color: var(--muted); font-family: var(--mono); font-size: 8px; }
+.monitor-checks { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 6px; }
+.monitor-check { display: inline-flex; align-items: center; gap: 6px; padding: 6px 8px; border: 1px solid #c8d7ca; border-radius: 999px; background: rgba(255,255,255,.72); font-family: var(--mono); font-size: 8px; text-transform: capitalize; }
+.monitor-check i { width: 6px; height: 6px; border-radius: 50%; background: #4ca76a; }
+.monitor-check-failed { border-color: #dfa8a5; }
+.monitor-check-failed i { background: #d65b57; }
 
 .ops-metrics {
   display: grid;
@@ -2699,6 +2725,8 @@ a:focus-visible {
   .pulse-rail { grid-template-columns: repeat(4, 1fr); }
   .pulse-lead { grid-column: 1 / -1; border-bottom: 1px solid rgba(255,255,255,.12); }
   .pulse-instances { grid-column: 1 / -1; border-top: 1px solid rgba(255,255,255,.12); }
+  .monitor-panel { align-items: flex-start; flex-direction: column; }
+  .monitor-checks { justify-content: flex-start; }
   .ops-metrics { grid-template-columns: repeat(2, 1fr); }
   .history-head { display: none; }
   .history-row { grid-template-columns: 1fr 1fr; }

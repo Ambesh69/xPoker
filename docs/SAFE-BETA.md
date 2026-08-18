@@ -9,6 +9,7 @@ Status: zero-value multiplayer candidate. `REAL_VALUE_MODE` must remain disabled
 - Runtime: Railway container with managed PostgreSQL and Redis on the project-private network
 - Schema: migrations `001_core.sql` through `005_beta_operations.sql` run as a pre-deploy release step
 - Health gate: `/health/ready` must confirm both authoritative dependencies before a deployment is promoted
+- Operational gate: `/health/ops` must report healthy dependency latency, queues, clocks, table progress, drand reservations, HTTP errors, and realtime disconnects
 - Value boundary: `REAL_VALUE_MODE=disabled`; the release-status endpoint deliberately reports the unfulfilled real-value gates
 
 The browser is configured with the exact API origin. API CORS and WebSocket upgrades accept only `https://xpoker.vercel.app`.
@@ -74,6 +75,10 @@ ALLOWED_ORIGINS=https://<frontend>
 DATABASE_URL=postgresql://...?...sslmode=verify-full
 REDIS_URL=rediss://...
 SAFE_BETA_SIGNING_KEY_PEM=<Ed25519 private key secret>
+METRICS_BEARER_TOKEN=<random 32+ character secret>
+# Optional external notification receiver:
+ALERT_WEBHOOK_URL=https://<alert receiver>
+ALERT_WEBHOOK_TOKEN=<sealed receiver secret>
 ```
 
 Apply migrations before starting the service:
@@ -86,4 +91,4 @@ npm start
 
 The service needs a long-lived process with WebSocket support; the static Vercel frontend is not that process. Use TLS PostgreSQL, TLS Redis, and a container host that supports long-lived WebSockets. Put the API behind HTTPS/WSS, set the frontend `xpoker-api-origin` meta value to the exact API origin, and keep both origins exact—never `*`.
 
-The repository includes a five-minute production smoke workflow, a monthly clean-database backup/restore drill, request/latency/error telemetry, persisted redacted incidents, replica heartbeats, and an authenticated Pit Board for moderation. See [`BETA-OPERATIONS.md`](BETA-OPERATIONS.md) for setup and incident recovery. Managed database backups, point-in-time recovery, and a sealed stable Ed25519 secret still depend on the hosting plan and must be verified in the Railway dashboard. Free hosting tiers are suitable for testing availability, not for a production SLA.
+The repository includes a five-minute production smoke workflow, a monthly clean-database backup/restore drill, protected Prometheus metrics, operational probes, persisted redacted incidents, replica heartbeats, and an authenticated Pit Board for moderation. See [`BETA-OPERATIONS.md`](BETA-OPERATIONS.md) and [`INCIDENT-RESPONSE.md`](INCIDENT-RESPONSE.md) for setup, triage, and recovery. Managed database backups, point-in-time recovery, and a sealed stable Ed25519 secret still depend on the hosting plan and must be verified in the Railway dashboard. Free hosting tiers are suitable for testing availability, not for a production SLA.

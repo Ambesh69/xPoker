@@ -104,6 +104,8 @@ This candidate is local/devnet-only. It has not been independently audited and i
 - Incident context is bounded and recursively redacted before persistence; authorization, cookies, signatures, seeds, tokens, secrets, and private-key fields are never retained.
 - Player suspension/bans and report decisions produce immutable append-only moderation events.
 - Five-minute public smoke checks open one deduplicated GitHub incident and close it automatically after recovery.
+- Replica-local Prometheus metrics use bounded labels and a constant-time bearer check; operational probes cover dependencies, latency, pool pressure, action clocks, table progress, drand reservations, HTTP errors and WebSocket disconnects.
+- Optional HTTPS alerts are redacted, cross-replica deduplicated and emit both firing and recovery events; the Pit Board exposes the same coarse health state to operators.
 - A scheduled monthly logical-backup drill restores into a clean PostgreSQL database and verifies current migrations, append-only triggers, transcript continuity, table chains, and ledger balance.
 - A disposable closed-beta certification signs generated wallets, enforces invitations, completes NLH/PLO4/ROE hands and proofs, exercises reconnects and timeout leases, replaces an API replica, interrupts Redis, injects PostgreSQL latency/pool pressure, and runs 16 concurrent tables through a bounded soak plus retry, contention, and drand-outage checks.
 

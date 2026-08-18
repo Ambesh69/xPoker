@@ -56,7 +56,7 @@ export function evaluateReleaseGates({ config, manifest, now = new Date() }) {
     ["strict_origins", config.allowedOrigins.length > 0 && config.allowedOrigins.every((origin) => origin.startsWith("https://"))],
     ["geofencing_configured", Boolean(config.geofencingProvider)],
     ["identity_controls_configured", Boolean(config.identityProvider)],
-    ["monitoring_configured", Boolean(config.monitoringDsn)],
+    ["monitoring_configured", Boolean(config.monitoringDsn || config.alertWebhookUrl)],
     ["asset_allowlist_versioned", /^[a-z0-9][a-z0-9._-]{7,127}$/i.test(config.assetAllowlistVersion ?? "")],
     ["release_manifest_version", manifest?.version === "xpoker-release/v1"],
     ["release_matches_build", manifest?.buildCommit === config.buildCommit && /^[0-9a-f]{40}$/i.test(config.buildCommit ?? "")],
