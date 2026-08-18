@@ -1,0 +1,53 @@
+name: Backup restore drill
+
+on:
+  schedule:
+    - cron: "17 3 1 * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  restore:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: xpoker
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d xpoker"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/xpoker
+      VERIFY_DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/xpoker_restore
+      PGPASSWORD: postgres
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Install matching PostgreSQL client
+        run: sudo apt-get update && sudo apt-get install -y postgresql-client-16
+      - name: Create representative schema and records
+        run: |
+          npm run migrate
+          psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -c "INSERT INTO safe_beta_profiles (wallet_address, display_name, is_guest) VALUES ('restore-drill-wallet', 'Restore Drill', true);"
+      - name: Create logical backup
+        run: pg_dump --format=custom --no-owner --no-acl --file=xpoker.dump "$DATABASE_URL"
+      - name: Restore into a clean database
+        run: |
+          createdb -h 127.0.0.1 -U postgres xpoker_restore
+          pg_restore --exit-on-error --no-owner --no-acl --dbname="$VERIFY_DATABASE_URL" xpoker.dump
+      - name: Verify restored invariants
+        run: npm run verify:restore

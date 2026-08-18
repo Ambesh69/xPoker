@@ -7,7 +7,7 @@ Status: zero-value multiplayer candidate. `REAL_VALUE_MODE` must remain disabled
 - Frontend: `https://xpoker.vercel.app`
 - Authoritative API/WebSocket origin: `https://xpoker-api-production.up.railway.app`
 - Runtime: Railway container with managed PostgreSQL and Redis on the project-private network
-- Schema: migrations `001_core.sql` through `004_safe_beta.sql` run as a pre-deploy release step
+- Schema: migrations `001_core.sql` through `005_beta_operations.sql` run as a pre-deploy release step
 - Health gate: `/health/ready` must confirm both authoritative dependencies before a deployment is promoted
 - Value boundary: `REAL_VALUE_MODE=disabled`; the release-status endpoint deliberately reports the unfulfilled real-value gates
 
@@ -30,10 +30,15 @@ All browser routes require an exact `Origin` in `ALLOWED_ORIGINS`. Authenticated
 
 - `GET /v1/beta/lobby` — public rooms, authorized private rooms, ten demo assets, and the caller's profile.
 - `POST /v1/beta/demo-session` — issue a guest identity when safe-beta mode is enabled.
+- `GET|POST /v1/beta/profile` — read or update a display name, short bio, and avatar style.
+- `POST /v1/beta/invitations/redeem` — redeem a closed-beta access code; PostgreSQL stores only its SHA-256 digest.
 - `POST /v1/beta/rooms` — create a private room with validated blinds, buy-ins, seats, rake, cap, clocks, and ROE rotation.
 - `POST /v1/beta/rooms/join` — join by a one-time-displayed invite code; PostgreSQL stores only SHA-256.
 - `POST /v1/beta/tables/join` — route a room and denomination to one preview table shard and seat the authenticated identity idempotently.
+- `GET /v1/beta/hands` — return only hands whose immutable `HAND_OPENED` participant set includes the caller.
 - `GET /v1/beta/hands/:handId/audit` — for a seated identity, reverify the completed hand's drand round and return its reconstruction bundle and signed transcript head.
+- `GET /v1/beta/hands/:handId/audit/download` — download the same authorized bundle as JSON.
+- `POST /v1/beta/reports` — report a player, hand, bug, or fairness concern to the moderation queue.
 
 The four bootstrapped public rooms are Opening Bell (NLH), Four Cards (PLO 4), and two ROE rooms. Their minimum demo buy-in is $20.
 
@@ -62,6 +67,8 @@ Required environment:
 NODE_ENV=production
 SAFE_BETA_MODE=enabled
 REAL_VALUE_MODE=disabled
+BETA_INVITE_REQUIRED=disabled
+ADMIN_WALLETS=<comma-separated Solana public addresses>
 PUBLIC_ORIGIN=https://<frontend>
 ALLOWED_ORIGINS=https://<frontend>
 DATABASE_URL=postgresql://...?...sslmode=verify-full
@@ -79,4 +86,4 @@ npm start
 
 The service needs a long-lived process with WebSocket support; the static Vercel frontend is not that process. Use TLS PostgreSQL, TLS Redis, and a container host that supports long-lived WebSockets. Put the API behind HTTPS/WSS, set the frontend `xpoker-api-origin` meta value to the exact API origin, and keep both origins exact—never `*`.
 
-For a public beta, use at least two service instances, managed database backups, point-in-time recovery, Redis persistence appropriate for session recovery, metrics/alerts, log redaction, rate-limit monitoring, and a stable Ed25519 key from a secret manager. Free hosting tiers are suitable for testing availability, not for a production SLA.
+The repository includes a five-minute production smoke workflow, a monthly clean-database backup/restore drill, request/latency/error telemetry, persisted redacted incidents, replica heartbeats, and an authenticated Pit Board for moderation. See [`BETA-OPERATIONS.md`](BETA-OPERATIONS.md) for setup and incident recovery. Managed database backups, point-in-time recovery, and a sealed stable Ed25519 secret still depend on the hosting plan and must be verified in the Railway dashboard. Free hosting tiers are suitable for testing availability, not for a production SLA.

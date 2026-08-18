@@ -97,6 +97,15 @@ This candidate is local/devnet-only. It has not been independently audited and i
 - The full manifest must be signed by a separate Ed25519 release authority.
 - TLS Postgres, TLS Redis, strict HTTPS origins, dedicated Solana RPC, identity, geofencing, monitoring and isolated dealer keys are mandatory.
 
+### Safe-beta operations
+
+- Authenticated operator roles are stored in PostgreSQL; only configured admin public wallets can create access codes or resolve infrastructure incidents.
+- The Pit Board shows live replica heartbeats, request volume, average latency, HTTP 5xx rate, active tables, reports, and deduplicated incidents.
+- Incident context is bounded and recursively redacted before persistence; authorization, cookies, signatures, seeds, tokens, secrets, and private-key fields are never retained.
+- Player suspension/bans and report decisions produce immutable append-only moderation events.
+- Five-minute public smoke checks open one deduplicated GitHub incident and close it automatically after recovery.
+- A scheduled monthly logical-backup drill restores into a clean PostgreSQL database and verifies current migrations, append-only triggers, transcript continuity, table chains, and ledger balance.
+
 ## xStocks-specific invariants
 
 Canonical mint addresses—not ticker strings—define the allowlist. On Solana, xStocks use Token-2022 and displayed balances require the current asset multiplier. The service must snapshot the mint, raw atomic quantity, decimals, multiplier value, multiplier timestamp/source, price timestamp/source and allowlist version for every buy-in and cash-out.
@@ -147,4 +156,4 @@ curl http://127.0.0.1:8787/health/ready
 
 Without signed release evidence, the response reports `safe-preview`. Setting `REAL_VALUE_MODE=enabled` without all gates changes readiness to HTTP 503; it does not enable money play.
 
-For the multiplayer safe beta, set `SAFE_BETA_MODE=enabled`, apply migration `004_safe_beta.sql`, and provide a stable Ed25519 `SAFE_BETA_SIGNING_KEY_PEM` in production. The beta automatically reserves future signature-verified drand rounds and exposes completed reconstruction bundles, but all value paths remain disabled. See [`SAFE-BETA.md`](SAFE-BETA.md).
+For the multiplayer safe beta, set `SAFE_BETA_MODE=enabled`, apply migration `005_beta_operations.sql`, and provide a stable Ed25519 `SAFE_BETA_SIGNING_KEY_PEM` as a sealed production secret. The beta automatically reserves future signature-verified drand rounds and exposes completed reconstruction bundles, but all value paths remain disabled. See [`SAFE-BETA.md`](SAFE-BETA.md) and [`BETA-OPERATIONS.md`](BETA-OPERATIONS.md).

@@ -3,15 +3,18 @@ import { generateKeyPairSync } from "node:crypto";
 import test from "node:test";
 
 import { applyMigrations } from "./migrate.js";
+import { BetaOperationsService } from "./beta-operations.js";
 import { PostgresHandEventStore, createPostgresPool } from "./postgres-hand-store.js";
 import { PostgresTableEventStore } from "./postgres-table-store.js";
+import { createRedisConnection } from "./redis-stores.js";
 import { AuthoritativeTableCoordinator, nextHandSetup } from "./table-coordinator.js";
 import { TranscriptSigner, verifyTranscript } from "./transcript.js";
 
 const connectionString = process.env.DATABASE_URL_TEST;
+const redisUrl = process.env.REDIS_URL_TEST;
 
 test("Postgres hand store atomically persists an idempotent signed transcript", {
-  skip: !connectionString,
+  skip: !connectionString || !redisUrl,
 }, async () => {
   const pool = await createPostgresPool({ connectionString });
   const migrationResult = await applyMigrations({ pool });
@@ -20,6 +23,7 @@ test("Postgres hand store atomically persists an idempotent signed transcript", 
     "002_gameplay_settlement.sql",
     "003_realtime_tables.sql",
     "004_safe_beta.sql",
+    "005_beta_operations.sql",
   ]);
   assert.deepEqual((await applyMigrations({ pool })).applied, []);
   const roomId = "018f47a6-7b9d-7cc3-8a23-60bfc31e3f45";
@@ -195,5 +199,64 @@ test("Postgres hand store atomically persists an idempotent signed transcript", 
     pool.query("DELETE FROM table_state_snapshots WHERE table_session_id = $1", [tableId]),
     /append-only/i,
   );
+
+  const adminWallet = "11111111111111111111111111111111";
+  const playerWallet = "SysvarC1ock11111111111111111111111111111111";
+  await pool.query(
+    `INSERT INTO safe_beta_profiles (wallet_address, display_name, is_guest)
+     VALUES ($1, 'Admin Player', false), ($2, 'Invited Player', false)
+     ON CONFLICT (wallet_address) DO NOTHING`,
+    [adminWallet, playerWallet],
+  );
+  const redis = await createRedisConnection(redisUrl);
+  await redis.connect();
+  const operations = new BetaOperationsService({
+    pool,
+    redis,
+    adminWallets: [adminWallet],
+    instanceId: "integration-instance",
+    buildCommit: "integration-build",
+  });
+  await operations.bootstrap();
+  assert.equal(await operations.operator(adminWallet), "admin");
+  const invitation = await operations.createInvite({
+    wallet: adminWallet,
+    label: "Integration cohort",
+    maxUses: 2,
+    expiresHours: 24,
+  });
+  assert.match(invitation.code, /^BETA-[A-Z2-9]{5}-[A-Z2-9]{5}$/);
+  assert.equal((await operations.redeemInvite({ wallet: playerWallet, code: invitation.code })).granted, true);
+  await operations.recordRequest({ method: "GET", path: "/health/ready", statusCode: 200, durationMs: 12.5 });
+  await operations.recordIncident({ category: "integration_warning", severity: "warning", message: "Restore drill signal" });
+  await operations.start();
+  const overview = await operations.overview(adminWallet);
+  assert.equal(overview.instances.some((instance) => instance.instanceId === "integration-instance"), true);
+  assert.equal(overview.summary.openIncidents, 1);
+  const report = await pool.query(
+    `INSERT INTO safe_beta_reports (reporter_wallet, reported_wallet, category, details)
+     VALUES ($1, $2, 'stalling', 'Repeatedly consumed the full action clock.')
+     RETURNING id`,
+    [adminWallet, playerWallet],
+  );
+  assert.equal((await operations.listReports({ wallet: adminWallet })).length, 1);
+  assert.equal((await operations.moderateReport({
+    wallet: adminWallet,
+    reportId: report.rows[0].id,
+    status: "resolved",
+    note: "Reviewed the action log and contacted the player.",
+  })).status, "resolved");
+  assert.equal((await operations.moderatePlayer({
+    wallet: adminWallet,
+    playerWallet,
+    status: "suspended",
+    note: "Temporary closed-beta hold.",
+  })).status, "suspended");
+  await assert.rejects(
+    pool.query("UPDATE safe_beta_moderation_events SET payload = '{}'"),
+    /append-only/i,
+  );
+  await operations.close();
+  await redis.quit();
   await pool.end();
 });

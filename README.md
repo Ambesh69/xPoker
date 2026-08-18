@@ -14,7 +14,7 @@ No frontend build step is required. Without the authoritative API, the site rema
 
 ## Safe multiplayer beta
 
-The current client and server now provide real Solana wallet challenge signing, expiring guest sessions, four permanent public rooms, hashed-invite private rooms, idempotent table seating, authenticated WebSocket reconnects, encrypted private cards, automatic NLH/PLO 4/ROE hands using a future verified drand round, and post-hand audit retrieval. Demo credits are isolated from the real-value ledger and have no deposit, withdrawal, escrow, settlement, or cash-out path.
+The current client and server now provide real Solana wallet challenge signing, expiring guest sessions, four permanent public rooms, hashed-invite private rooms, closed-beta access codes, player profiles, hand history and proof downloads, player reporting/moderation, an operator dashboard, idempotent table seating, authenticated WebSocket reconnects, encrypted private cards, automatic NLH/PLO 4/ROE hands using a future verified drand round, and post-hand audit retrieval. Demo credits are isolated from the real-value ledger and have no deposit, withdrawal, escrow, settlement, or cash-out path.
 
 Run the complete service with PostgreSQL and Redis after copying `.env.example`:
 
@@ -24,7 +24,7 @@ npm run migrate
 npm start
 ```
 
-Then serve the frontend at `PUBLIC_ORIGIN`. See [`docs/SAFE-BETA.md`](docs/SAFE-BETA.md) for the API, fairness lifecycle, security boundary, and deployment requirements.
+Then serve the frontend at `PUBLIC_ORIGIN`. See [`docs/SAFE-BETA.md`](docs/SAFE-BETA.md) for the API, fairness lifecycle, security boundary, and deployment requirements, and [`docs/BETA-OPERATIONS.md`](docs/BETA-OPERATIONS.md) for alerts, backups, restore drills, replicas, and moderation.
 
 ## Fair-deal foundation
 

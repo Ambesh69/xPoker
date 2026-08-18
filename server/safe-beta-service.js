@@ -2,10 +2,12 @@ import { createHash, randomBytes, randomUUID } from "node:crypto";
 
 import { canonicalJson } from "../fairness/protocol.js";
 import { normalizeRules, tableView } from "./table-coordinator.js";
-import { encodeBase58 } from "./wallet-auth.js";
+import { decodeBase58, encodeBase58 } from "./wallet-auth.js";
 
 const SAFE_BETA_ALLOWLIST_VERSION = "safe-beta-v1";
 const INVITE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+const AVATAR_STYLES = new Set(["felt", "river", "ticker", "night"]);
+const REPORT_CATEGORIES = new Set(["collusion", "harassment", "stalling", "bug", "fairness", "other"]);
 
 function fail(message, statusCode = 400, code = "invalid_request") {
   const error = new Error(message);
@@ -49,6 +51,21 @@ function displayName(value, wallet) {
   if (normalized.length < 2 || normalized.length > 24) fail("Display name must be 2 to 24 characters");
   if (!/^[\p{L}\p{N} ._'-]+$/u.test(normalized)) fail("Display name contains unsupported characters");
   return normalized;
+}
+
+function profileBio(value) {
+  const normalized = typeof value === "string" ? value.trim().replace(/\s+/g, " ") : "";
+  if (normalized.length > 160) fail("Profile bio must be 160 characters or fewer");
+  return normalized;
+}
+
+function walletAddress(value, label = "Wallet") {
+  try {
+    if (typeof value !== "string" || decodeBase58(value).length !== 32) throw new Error();
+    return value;
+  } catch {
+    fail(`${label} is invalid`);
+  }
 }
 
 function dollarsToAtomic(value, label, { minimum = 0.01, maximum = 1_000_000 } = {}) {
@@ -159,7 +176,7 @@ function roomView(row) {
 }
 
 export class SafeBetaService {
-  constructor({ pool, sessionStore, tableCoordinator, dealer } = {}) {
+  constructor({ pool, sessionStore, tableCoordinator, dealer, operations, inviteRequired = false } = {}) {
     if (!pool?.query || !pool?.connect) throw new Error("Safe beta requires PostgreSQL");
     if (!sessionStore?.issue) throw new Error("Safe beta requires a session store");
     if (!tableCoordinator?.state || !tableCoordinator?.seatPlayer) throw new Error("Safe beta requires a table coordinator");
@@ -167,6 +184,8 @@ export class SafeBetaService {
     this.sessionStore = sessionStore;
     this.tableCoordinator = tableCoordinator;
     this.dealer = dealer;
+    this.operations = operations;
+    this.inviteRequired = inviteRequired;
   }
 
   async bootstrap() {
@@ -224,8 +243,10 @@ export class SafeBetaService {
                WHEN safe_beta_profiles.is_guest THEN EXCLUDED.display_name
                ELSE safe_beta_profiles.display_name
              END,
-             updated_at = now()
-       RETURNING wallet_address, display_name, is_guest, demo_credit_atomic`,
+             updated_at = now(),
+             last_seen_at = now()
+       RETURNING wallet_address, display_name, is_guest, demo_credit_atomic, bio,
+                 avatar_style, status, beta_access_granted_at, last_seen_at, created_at`,
       [wallet, normalized, isGuest],
     );
     const row = result.rows[0];
@@ -234,14 +255,39 @@ export class SafeBetaService {
       displayName: row.display_name,
       isGuest: row.is_guest,
       demoCreditAtomic: String(row.demo_credit_atomic),
+      bio: row.bio,
+      avatarStyle: row.avatar_style,
+      status: row.status,
+      betaAccessGrantedAt: row.beta_access_granted_at ? new Date(row.beta_access_granted_at).toISOString() : null,
+      lastSeenAt: new Date(row.last_seen_at).toISOString(),
+      createdAt: new Date(row.created_at).toISOString(),
     };
   }
 
-  async issueGuest({ name }) {
+  async issueGuest({ name, inviteCode }) {
     const wallet = encodeBase58(randomBytes(32));
     const profile = await this.ensureProfile({ wallet, name, isGuest: true });
+    if (this.inviteRequired) {
+      if (!this.operations?.redeemInvite) fail("A valid closed-beta invitation is required", 503, "invite_service_unavailable");
+      await this.operations.redeemInvite({ wallet, code: inviteCode });
+      profile.betaAccessGrantedAt = new Date().toISOString();
+    }
     const session = await this.sessionStore.issue({ wallet, ttlSeconds: 12 * 60 * 60 });
     return { ...session, profile };
+  }
+
+  async #assertPlayable(wallet) {
+    const result = await this.pool.query(
+      `SELECT status, beta_access_granted_at
+         FROM safe_beta_profiles
+        WHERE wallet_address = $1`,
+      [wallet],
+    );
+    const profile = result.rows[0];
+    if (!profile || profile.status !== "active") fail("This beta account cannot join games", 403, "account_restricted");
+    if (this.inviteRequired && !profile.beta_access_granted_at && !(await this.operations?.operator(wallet))) {
+      fail("A closed-beta invitation is required", 403, "invite_required");
+    }
   }
 
   async lobby({ wallet } = {}) {
@@ -279,10 +325,13 @@ export class SafeBetaService {
     })));
     const profile = wallet
       ? (await this.pool.query(
-        "SELECT display_name, is_guest, demo_credit_atomic FROM safe_beta_profiles WHERE wallet_address = $1",
+        `SELECT display_name, is_guest, demo_credit_atomic, bio, avatar_style, status,
+                beta_access_granted_at, last_seen_at, created_at
+           FROM safe_beta_profiles WHERE wallet_address = $1`,
         [wallet],
       )).rows[0]
       : undefined;
+    const operatorRole = wallet ? await this.operations?.operator(wallet) : null;
     return {
       mode: "safe-beta",
       fundsMove: false,
@@ -300,6 +349,13 @@ export class SafeBetaService {
         displayName: profile.display_name,
         isGuest: profile.is_guest,
         demoCreditAtomic: String(profile.demo_credit_atomic),
+        bio: profile.bio,
+        avatarStyle: profile.avatar_style,
+        status: profile.status,
+        betaAccessGrantedAt: profile.beta_access_granted_at ? new Date(profile.beta_access_granted_at).toISOString() : null,
+        lastSeenAt: new Date(profile.last_seen_at).toISOString(),
+        createdAt: new Date(profile.created_at).toISOString(),
+        operatorRole,
       } : null,
     };
   }
@@ -307,6 +363,7 @@ export class SafeBetaService {
   async createPrivateRoom({ wallet, input }) {
     const normalized = normalizePrivateRoom(input);
     await this.ensureProfile({ wallet });
+    await this.#assertPlayable(wallet);
     const code = inviteCode();
     const rules = { ...normalized, safeBeta: true };
     const client = await this.pool.connect();
@@ -340,6 +397,7 @@ export class SafeBetaService {
   async joinPrivateRoom({ wallet, code: rawCode }) {
     const code = normalizedInvite(rawCode);
     await this.ensureProfile({ wallet });
+    await this.#assertPlayable(wallet);
     const result = await this.pool.query(
       `SELECT room.id, room.owner_wallet, room.visibility, room.rules
          FROM safe_beta_room_invites invite
@@ -388,6 +446,7 @@ export class SafeBetaService {
       fail("Demo buy-in is outside the room limits");
     }
     await this.ensureProfile({ wallet });
+    await this.#assertPlayable(wallet);
 
     const client = await this.pool.connect();
     let tableId;
@@ -476,13 +535,133 @@ export class SafeBetaService {
     if (!match) fail("Hand id is invalid");
     if (!this.dealer?.audit) fail("Fairness audit service is unavailable", 503, "audit_unavailable");
     const authorized = await this.pool.query(
-      `SELECT 1 FROM table_seats
-        WHERE table_session_id = $1 AND wallet_address = $2
+      `SELECT 1 FROM hand_events
+        WHERE hand_id = $1 AND event_type = 'HAND_OPENED' AND payload->'players' ? $2
         LIMIT 1`,
-      [match[1], wallet],
+      [handId, wallet],
     );
     if (authorized.rowCount !== 1) fail("Wallet is not authorized for this hand", 403, "forbidden");
     return this.dealer.audit(handId);
+  }
+
+  async profile({ wallet }) {
+    const profile = await this.ensureProfile({ wallet });
+    return { ...profile, operatorRole: await this.operations?.operator(wallet) ?? null };
+  }
+
+  async updateProfile({ wallet, input }) {
+    const name = displayName(input?.displayName, wallet);
+    const bio = profileBio(input?.bio);
+    const avatarStyle = typeof input?.avatarStyle === "string" ? input.avatarStyle : "felt";
+    if (!AVATAR_STYLES.has(avatarStyle)) fail("Avatar style is invalid");
+    const result = await this.pool.query(
+      `UPDATE safe_beta_profiles
+          SET display_name = $2, bio = $3, avatar_style = $4, updated_at = now(), last_seen_at = now()
+        WHERE wallet_address = $1
+        RETURNING wallet_address, display_name, is_guest, demo_credit_atomic, bio,
+                  avatar_style, status, beta_access_granted_at, last_seen_at, created_at`,
+      [wallet, name, bio, avatarStyle],
+    );
+    if (result.rowCount !== 1) fail("Profile was not found", 404, "not_found");
+    const row = result.rows[0];
+    return {
+      wallet: row.wallet_address,
+      displayName: row.display_name,
+      isGuest: row.is_guest,
+      demoCreditAtomic: String(row.demo_credit_atomic),
+      bio: row.bio,
+      avatarStyle: row.avatar_style,
+      status: row.status,
+      betaAccessGrantedAt: row.beta_access_granted_at ? new Date(row.beta_access_granted_at).toISOString() : null,
+      lastSeenAt: new Date(row.last_seen_at).toISOString(),
+      createdAt: new Date(row.created_at).toISOString(),
+      operatorRole: await this.operations?.operator(wallet) ?? null,
+    };
+  }
+
+  async redeemAccessInvite({ wallet, code }) {
+    await this.ensureProfile({ wallet });
+    if (!this.operations?.redeemInvite) fail("Invitation service is unavailable", 503, "invite_service_unavailable");
+    return this.operations.redeemInvite({ wallet, code });
+  }
+
+  async handHistory({ wallet, limit = 25 }) {
+    const pageSize = integer(limit, "History limit", 1, 50);
+    const result = await this.pool.query(
+      `SELECT hand.id, hand.status, hand.started_at, hand.completed_at, hand.deck_root,
+              hand.beacon_round, room.rules,
+              opened.payload->'players' AS players,
+              finished.payload->'result' AS result
+         FROM hands hand
+         JOIN rooms room ON room.id = hand.room_id
+         JOIN LATERAL (
+           SELECT payload
+             FROM hand_events
+            WHERE hand_id = hand.id AND event_type = 'HAND_OPENED'
+            ORDER BY sequence ASC
+            LIMIT 1
+         ) opened ON true
+         LEFT JOIN LATERAL (
+           SELECT payload
+             FROM table_events
+            WHERE table_session_id = split_part(hand.id, ':', 2)::uuid
+              AND event_type = 'HAND_FINISHED'
+              AND payload->'result'->>'handId' = hand.id
+            ORDER BY sequence DESC
+            LIMIT 1
+         ) finished ON true
+        WHERE opened.payload->'players' ? $1
+        ORDER BY hand.started_at DESC, hand.id DESC
+        LIMIT $2`,
+      [wallet, pageSize],
+    );
+    return result.rows.map((row) => ({
+      handId: row.id,
+      status: row.status,
+      roomName: row.rules?.name ?? "Poker room",
+      game: row.rules?.tableRules?.game ?? row.result?.game ?? "NLH",
+      players: row.players ?? [],
+      result: row.result ?? null,
+      deckRoot: row.deck_root ? Buffer.from(row.deck_root).toString("hex") : null,
+      beaconRound: row.beacon_round ? Number(row.beacon_round) : null,
+      startedAt: new Date(row.started_at).toISOString(),
+      completedAt: row.completed_at ? new Date(row.completed_at).toISOString() : null,
+      auditAvailable: row.status === "complete",
+      fundsMove: false,
+    }));
+  }
+
+  async createReport({ wallet, input }) {
+    await this.ensureProfile({ wallet });
+    const category = typeof input?.category === "string" ? input.category : "";
+    if (!REPORT_CATEGORIES.has(category)) fail("Report category is invalid");
+    const details = typeof input?.details === "string" ? input.details.trim().replace(/\s+/g, " ") : "";
+    if (details.length < 10 || details.length > 1000) fail("Report details must be 10 to 1000 characters");
+    const handId = input?.handId || null;
+    if (handId) {
+      if (!/^table:[0-9a-f-]{36}:[1-9][0-9]*$/i.test(handId)) fail("Hand id is invalid");
+      const participant = await this.pool.query(
+        `SELECT 1 FROM hand_events
+          WHERE hand_id = $1 AND event_type = 'HAND_OPENED' AND payload->'players' ? $2
+          LIMIT 1`,
+        [handId, wallet],
+      );
+      if (participant.rowCount !== 1) fail("Only hand participants can report a hand", 403, "forbidden");
+    }
+    const reportedWallet = input?.reportedWallet ? walletAddress(input.reportedWallet, "Reported wallet") : null;
+    if (reportedWallet === wallet) fail("You cannot report your own wallet");
+    const result = await this.pool.query(
+      `INSERT INTO safe_beta_reports
+        (reporter_wallet, reported_wallet, hand_id, category, details)
+       VALUES ($1, $2, $3, $4, $5)
+       RETURNING id, status, created_at`,
+      [wallet, reportedWallet, handId, category, details],
+    );
+    return {
+      id: result.rows[0].id,
+      status: result.rows[0].status,
+      createdAt: new Date(result.rows[0].created_at).toISOString(),
+    };
   }
 }
 

@@ -59,7 +59,7 @@ async function authenticatedWallet(auth, request) {
   return session.wallet;
 }
 
-async function handleSafeBeta({ request, response, requestId, url, config, auth, safeBeta }) {
+async function handleSafeBeta({ request, response, requestId, url, config, auth, safeBeta, operations }) {
   const cors = authCors(config, request);
   if (!cors) {
     sendJson(response, 403, { error: "origin_forbidden", requestId }, requestId);
@@ -85,7 +85,7 @@ async function handleSafeBeta({ request, response, requestId, url, config, auth,
         });
         return;
       }
-      const result = await safeBeta.issueGuest({ name: body.displayName });
+      const result = await safeBeta.issueGuest({ name: body.displayName, inviteCode: body.inviteCode });
       sendJson(response, 201, { ...result, fundsMove: false, requestId }, requestId, cors);
       return;
     }
@@ -108,6 +108,34 @@ async function handleSafeBeta({ request, response, requestId, url, config, auth,
         });
         return;
       }
+    }
+    if (url.pathname === "/v1/beta/profile" && request.method === "GET") {
+      const result = await safeBeta.profile({ wallet });
+      sendJson(response, 200, { profile: result, fundsMove: false, requestId }, requestId, cors);
+      return;
+    }
+    if (url.pathname === "/v1/beta/profile" && request.method === "POST") {
+      const body = await readJson(request, config.bodyLimitBytes);
+      const result = await safeBeta.updateProfile({ wallet, input: body });
+      sendJson(response, 200, { profile: result, fundsMove: false, requestId }, requestId, cors);
+      return;
+    }
+    if (url.pathname === "/v1/beta/invitations/redeem" && request.method === "POST") {
+      const body = await readJson(request, config.bodyLimitBytes);
+      const result = await safeBeta.redeemAccessInvite({ wallet, code: body.code });
+      sendJson(response, 200, { ...result, fundsMove: false, requestId }, requestId, cors);
+      return;
+    }
+    if (url.pathname === "/v1/beta/hands" && request.method === "GET") {
+      const result = await safeBeta.handHistory({ wallet, limit: url.searchParams.get("limit") ?? 25 });
+      sendJson(response, 200, { hands: result, fundsMove: false, requestId }, requestId, cors);
+      return;
+    }
+    if (url.pathname === "/v1/beta/reports" && request.method === "POST") {
+      const body = await readJson(request, config.bodyLimitBytes);
+      const result = await safeBeta.createReport({ wallet, input: body });
+      sendJson(response, 201, { report: result, fundsMove: false, requestId }, requestId, cors);
+      return;
     }
     if (url.pathname === "/v1/beta/rooms" && request.method === "POST") {
       const body = await readJson(request, config.bodyLimitBytes);
@@ -132,6 +160,15 @@ async function handleSafeBeta({ request, response, requestId, url, config, auth,
       sendJson(response, 200, { ...result, requestId }, requestId, cors);
       return;
     }
+    const auditDownloadMatch = /^\/v1\/beta\/hands\/(table:[0-9a-f-]{36}:[1-9][0-9]*)\/audit\/download$/i.exec(url.pathname);
+    if (auditDownloadMatch && request.method === "GET") {
+      const result = await safeBeta.handAudit({ wallet, handId: auditDownloadMatch[1] });
+      sendJson(response, 200, { ...result, requestId }, requestId, {
+        ...cors,
+        "content-disposition": `attachment; filename="xpoker-${auditDownloadMatch[1].replaceAll(":", "-")}-audit.json"`,
+      });
+      return;
+    }
     const auditMatch = /^\/v1\/beta\/hands\/(table:[0-9a-f-]{36}:[1-9][0-9]*)\/audit$/i.exec(url.pathname);
     if (auditMatch && request.method === "GET") {
       const result = await safeBeta.handAudit({ wallet, handId: auditMatch[1] });
@@ -142,15 +179,114 @@ async function handleSafeBeta({ request, response, requestId, url, config, auth,
   } catch (error) {
     const expected = Number.isInteger(error?.statusCode);
     const statusCode = expected ? error.statusCode : 500;
-    if (!expected) console.error(JSON.stringify({
+    if (!expected) {
+      const context = {
       level: "error",
       event: "safe_beta_http_failed",
       requestId,
       error: error instanceof Error ? error.message : String(error),
-    }));
+      };
+      console.error(JSON.stringify(context));
+      operations?.recordIncident({
+        category: "safe_beta_http_failed",
+        message: context.error,
+        context: { requestId, method: request.method, path: url.pathname },
+      }).catch(() => {});
+    }
     sendJson(response, statusCode, {
       error: expected ? error?.code ?? "invalid_request" : "internal_error",
       message: expected && error instanceof Error ? error.message : "Safe beta request failed",
+      requestId,
+    }, requestId, cors);
+  }
+}
+
+async function handleAdmin({ request, response, requestId, url, config, auth, operations }) {
+  const cors = authCors(config, request);
+  if (!cors) {
+    sendJson(response, 403, { error: "origin_forbidden", requestId }, requestId);
+    return;
+  }
+  if (request.method === "OPTIONS") {
+    response.writeHead(204, { ...SECURITY_HEADERS, ...cors, "x-request-id": requestId });
+    response.end();
+    return;
+  }
+  if (!operations) {
+    sendJson(response, 503, { error: "operations_unavailable", requestId }, requestId, cors);
+    return;
+  }
+  const wallet = await authenticatedWallet(auth, request);
+  if (!wallet) {
+    sendJson(response, 401, { error: "authentication_required", requestId }, requestId, cors);
+    return;
+  }
+  try {
+    if (request.method !== "GET") {
+      const rate = await enforceAuthRateLimit({ auth, request, route: "admin-write", identity: wallet });
+      if (rate && !rate.allowed) {
+        sendJson(response, 429, { error: "rate_limited", requestId }, requestId, {
+          ...cors,
+          "retry-after": String(Math.max(1, Math.ceil(rate.retryAfterMs / 1_000))),
+        });
+        return;
+      }
+    }
+    if (url.pathname === "/v1/admin/overview" && request.method === "GET") {
+      sendJson(response, 200, { ...(await operations.overview(wallet)), requestId }, requestId, cors);
+      return;
+    }
+    if (url.pathname === "/v1/admin/invites" && request.method === "GET") {
+      sendJson(response, 200, { invites: await operations.listInvites(wallet), requestId }, requestId, cors);
+      return;
+    }
+    if (url.pathname === "/v1/admin/invites" && request.method === "POST") {
+      const body = await readJson(request, config.bodyLimitBytes);
+      sendJson(response, 201, { ...(await operations.createInvite({ wallet, ...body })), requestId }, requestId, cors);
+      return;
+    }
+    const inviteMatch = /^\/v1\/admin\/invites\/([0-9a-f-]{36})\/revoke$/i.exec(url.pathname);
+    if (inviteMatch && request.method === "POST") {
+      sendJson(response, 200, { ...(await operations.revokeInvite({ wallet, inviteId: inviteMatch[1] })), requestId }, requestId, cors);
+      return;
+    }
+    if (url.pathname === "/v1/admin/players" && request.method === "GET") {
+      sendJson(response, 200, { players: await operations.listPlayers({ wallet, search: url.searchParams.get("search") ?? "" }), requestId }, requestId, cors);
+      return;
+    }
+    const playerMatch = /^\/v1\/admin\/players\/([^/]+)$/i.exec(url.pathname);
+    if (playerMatch && request.method === "POST") {
+      const body = await readJson(request, config.bodyLimitBytes);
+      sendJson(response, 200, { player: await operations.moderatePlayer({ wallet, playerWallet: decodeURIComponent(playerMatch[1]), ...body }), requestId }, requestId, cors);
+      return;
+    }
+    if (url.pathname === "/v1/admin/reports" && request.method === "GET") {
+      sendJson(response, 200, { reports: await operations.listReports({ wallet, status: url.searchParams.get("status") }), requestId }, requestId, cors);
+      return;
+    }
+    const reportMatch = /^\/v1\/admin\/reports\/([0-9a-f-]{36})$/i.exec(url.pathname);
+    if (reportMatch && request.method === "POST") {
+      const body = await readJson(request, config.bodyLimitBytes);
+      sendJson(response, 200, { report: await operations.moderateReport({ wallet, reportId: reportMatch[1], ...body }), requestId }, requestId, cors);
+      return;
+    }
+    const incidentMatch = /^\/v1\/admin\/incidents\/([0-9a-f-]{36})\/resolve$/i.exec(url.pathname);
+    if (incidentMatch && request.method === "POST") {
+      sendJson(response, 200, { incident: await operations.resolveIncident({ wallet, incidentId: incidentMatch[1] }), requestId }, requestId, cors);
+      return;
+    }
+    sendJson(response, 404, { error: "not_found", requestId }, requestId, cors);
+  } catch (error) {
+    const expected = Number.isInteger(error?.statusCode);
+    const statusCode = expected ? error.statusCode : 500;
+    if (!expected) operations.recordIncident({
+      category: "admin_http_failed",
+      message: error instanceof Error ? error.message : String(error),
+      context: { requestId, method: request.method, path: url.pathname },
+    }).catch(() => {});
+    sendJson(response, statusCode, {
+      error: expected ? error.code ?? "invalid_request" : "internal_error",
+      message: expected && error instanceof Error ? error.message : "Operations request failed",
       requestId,
     }, requestId, cors);
   }
@@ -309,17 +445,30 @@ async function handleAuth({ request, response, requestId, url, config, auth }) {
   sendJson(response, 404, { error: "not_found", requestId }, requestId, cors);
 }
 
-export function createRequestHandler({ config, gates, auth, safeBeta, healthCheck }) {
+export function createRequestHandler({ config, gates, auth, safeBeta, operations, healthCheck }) {
   return async (request, response) => {
+    const startedAt = performance.now();
     const suppliedRequestId = request.headers["x-request-id"];
     const requestId = typeof suppliedRequestId === "string" ? suppliedRequestId.slice(0, 128) : randomUUID();
     const url = new URL(request.url, "http://internal");
+    response.once?.("finish", () => {
+      operations?.recordRequest({
+        method: request.method,
+        path: url.pathname,
+        statusCode: response.statusCode,
+        durationMs: performance.now() - startedAt,
+      }).catch(() => {});
+    });
     if (url.pathname.startsWith("/v1/auth/") && !url.search) {
       await handleAuth({ request, response, requestId, url, config, auth });
       return;
     }
     if (url.pathname.startsWith("/v1/beta/")) {
-      await handleSafeBeta({ request, response, requestId, url, config, auth, safeBeta });
+      await handleSafeBeta({ request, response, requestId, url, config, auth, safeBeta, operations });
+      return;
+    }
+    if (url.pathname.startsWith("/v1/admin/")) {
+      await handleAdmin({ request, response, requestId, url, config, auth, operations });
       return;
     }
     if (request.method !== "GET") {
@@ -362,10 +511,10 @@ export function createRequestHandler({ config, gates, auth, safeBeta, healthChec
   };
 }
 
-export async function createApiServer({ config = loadConfig(), manifest, auth, safeBeta, healthCheck } = {}) {
+export async function createApiServer({ config = loadConfig(), manifest, auth, safeBeta, operations, healthCheck } = {}) {
   const releaseManifest = manifest ?? await readManifest(config.releaseManifestPath);
   const gates = evaluateReleaseGates({ config, manifest: releaseManifest });
-  const server = createServer(createRequestHandler({ config, gates, auth, safeBeta, healthCheck }));
+  const server = createServer(createRequestHandler({ config, gates, auth, safeBeta, operations, healthCheck }));
   server.releaseGates = gates;
   return server;
 }
@@ -379,6 +528,7 @@ export async function startApiServer({ config = loadConfig(), runtimeFactory = c
     config,
     auth: runtime?.auth,
     safeBeta: runtime?.safeBeta,
+    operations: runtime?.operations,
     healthCheck: runtime?.health,
   });
   try {

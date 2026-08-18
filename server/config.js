@@ -1,9 +1,23 @@
+import { decodeBase58 } from "./wallet-auth.js";
+
 function integer(value, fallback, { minimum, maximum, label }) {
   const parsed = value === undefined ? fallback : Number(value);
   if (!Number.isInteger(parsed) || parsed < minimum || parsed > maximum) {
     throw new Error(`${label} must be an integer from ${minimum} to ${maximum}`);
   }
   return parsed;
+}
+
+function wallets(value) {
+  if (!value) return [];
+  return [...new Set(value.split(",").map((item) => item.trim()).filter(Boolean))].map((wallet) => {
+    try {
+      if (decodeBase58(wallet).length !== 32) throw new Error();
+    } catch {
+      throw new Error("ADMIN_WALLETS must contain Solana wallet addresses");
+    }
+    return wallet;
+  });
 }
 
 function origins(value) {
@@ -28,6 +42,9 @@ export function loadConfig(env = process.env) {
     allowedOrigins: origins(env.ALLOWED_ORIGINS ?? publicOrigin),
     realValueMode,
     safeBetaMode,
+    betaInviteRequired: env.BETA_INVITE_REQUIRED === "enabled",
+    adminWallets: wallets(env.ADMIN_WALLETS),
+    instanceId: env.RAILWAY_REPLICA_ID ?? env.RAILWAY_DEPLOYMENT_ID ?? env.HOSTNAME,
     databaseUrl: env.DATABASE_URL,
     redisUrl: env.REDIS_URL,
     dealerKeyProvider: env.DEALER_KEY_PROVIDER,

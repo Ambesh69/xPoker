@@ -14,6 +14,7 @@
     "audit": "npm audit --omit=dev --audit-level=high",
     "fairness:demo": "node fairness/demo.js",
     "migrate": "node server/migrate.js",
+    "verify:restore": "node server/restore-verify.js",
     "start": "node server/http.js"
   },
   "engines": {

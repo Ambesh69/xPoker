@@ -1,5 +1,6 @@
 import { createPostgresPool } from "./postgres-hand-store.js";
 import { PostgresTableEventStore } from "./postgres-table-store.js";
+import { BetaOperationsService } from "./beta-operations.js";
 import { attachRealtimeServer } from "./realtime.js";
 import { RedisTableEventBus } from "./redis-event-bus.js";
 import {
@@ -72,23 +73,48 @@ export async function createAuthoritativeRuntime({
   const redis = suppliedRedis ?? await createRedisConnection(config.redisUrl);
   let redisSubscriber = suppliedSubscriber;
   let realtime;
+  let operations;
   let attached = false;
   let closed = false;
 
   try {
     await pool.query("SELECT 1");
     const schema = await pool.query("SELECT name FROM schema_migrations ORDER BY name DESC LIMIT 1");
-    if (schema.rows[0]?.name !== "004_safe_beta.sql") {
+    if (schema.rows[0]?.name !== "005_beta_operations.sql") {
       throw new Error("Database schema is not current; run npm run migrate");
     }
     if (!redis.isOpen) await redis.connect();
     redisSubscriber ??= redis.duplicate();
+    operations = new BetaOperationsService({
+      pool,
+      redis,
+      adminWallets: config.adminWallets,
+      instanceId: config.instanceId,
+      buildCommit: config.buildCommit,
+      logger,
+    });
+    await operations.bootstrap();
+    const operationalLogger = {
+      log: logger.log?.bind(logger) ?? (() => {}),
+      warn: logger.warn?.bind(logger) ?? (() => {}),
+      error(value) {
+        logger.error(value);
+        let record = { event: "runtime_error", error: String(value) };
+        try { record = JSON.parse(value); } catch {}
+        operations.recordIncident({
+          category: record.event ?? "runtime_error",
+          severity: record.level === "critical" ? "critical" : "error",
+          message: record.error ?? record.message ?? String(value),
+          context: record,
+        }).catch(() => {});
+      },
+    };
     const tableStore = new PostgresTableEventStore({ pool });
     const eventBus = new RedisTableEventBus({ publisher: redis, subscriber: redisSubscriber });
     const tableCoordinator = new AuthoritativeTableCoordinator({
       store: tableStore,
       onEvent: (event) => eventBus.publish(event),
-      onEventError: (error, event) => logError(logger, "table_event_fanout_failed", error, {
+      onEventError: (error, event) => logError(operationalLogger, "table_event_fanout_failed", error, {
         tableId: event.tableId,
         sequence: event.sequence,
       }),
@@ -96,7 +122,7 @@ export async function createAuthoritativeRuntime({
     const timeoutWorker = createTimeoutWorker({
       store: tableStore,
       coordinator: tableCoordinator,
-      onError: (error, lease) => logError(logger, "table_timeout_failed", error, {
+      onError: (error, lease) => logError(operationalLogger, "table_timeout_failed", error, {
         tableId: lease?.tableId,
         bettingVersion: lease?.bettingVersion,
       }),
@@ -112,7 +138,7 @@ export async function createAuthoritativeRuntime({
       tableCoordinator,
       signingKeyPem: config.safeBetaSigningKeyPem,
       nodeEnv: config.nodeEnv,
-      logger,
+      logger: operationalLogger,
     }) : undefined;
     const unsubscribeSafeBetaDealer = safeBetaDealer
       ? tableCoordinator.subscribe(safeBetaDealer.onTableEvent)
@@ -122,6 +148,8 @@ export async function createAuthoritativeRuntime({
       sessionStore: auth.sessionStore,
       tableCoordinator,
       dealer: safeBetaDealer,
+      operations,
+      inviteRequired: config.betaInviteRequired,
     }) : undefined;
     if (safeBeta) await safeBeta.bootstrap();
     await recoverSafeBetaTables({ tableStore, tableCoordinator, dealer: safeBetaDealer });
@@ -146,6 +174,7 @@ export async function createAuthoritativeRuntime({
         getHoleCards: getHoleCards ?? safeBetaDealer?.getHoleCards,
       });
       await eventBus.start((event) => realtime.publish(event));
+      await operations.start();
       timeoutWorker.start();
       attached = true;
       return realtime;
@@ -159,12 +188,14 @@ export async function createAuthoritativeRuntime({
       await timeoutWorker.stop();
       if (realtime) await realtime.close();
       await eventBus.close();
+      await operations?.close();
       if (!suppliedRedis && redis.isOpen) await redis.quit();
       if (!suppliedPool) await pool.end();
     }
 
     return Object.freeze({
       auth,
+      operations,
       safeBeta,
       safeBetaDealer,
       tableStore,
@@ -176,6 +207,7 @@ export async function createAuthoritativeRuntime({
       close,
     });
   } catch (error) {
+    await operations?.close().catch(() => {});
     if (!suppliedSubscriber && redisSubscriber?.isOpen) await redisSubscriber.quit().catch(() => {});
     if (!suppliedRedis && redis.isOpen) await redis.quit().catch(() => {});
     if (!suppliedPool) await pool.end().catch(() => {});

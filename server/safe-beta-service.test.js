@@ -76,3 +76,36 @@ test("lobby seat counts follow authoritative table state after players leave", a
   assert.equal(result.rooms[0].tables, 2);
   assert.equal(result.rooms[0].seatsTaken, 1);
 });
+
+test("closed-beta guest sessions redeem an access invite before becoming playable", async () => {
+  const calls = [];
+  const pool = {
+    connect() {},
+    async query(sql, params) {
+      if (!sql.includes("INSERT INTO safe_beta_profiles")) throw new Error(`Unexpected query: ${sql}`);
+      return { rows: [{
+        wallet_address: params[0],
+        display_name: params[1],
+        is_guest: true,
+        demo_credit_atomic: "100000",
+        bio: "",
+        avatar_style: "felt",
+        status: "active",
+        beta_access_granted_at: null,
+        last_seen_at: "2026-08-18T00:00:00.000Z",
+        created_at: "2026-08-18T00:00:00.000Z",
+      }] };
+    },
+  };
+  const service = new SafeBetaService({
+    pool,
+    sessionStore: { issue: async (input) => { calls.push(["session", input]); return { token: "guest-token", wallet: input.wallet }; } },
+    tableCoordinator: { state() {}, seatPlayer() {} },
+    operations: { redeemInvite: async (input) => { calls.push(["invite", input]); return { granted: true }; } },
+    inviteRequired: true,
+  });
+  const result = await service.issueGuest({ name: "Invited Guest", inviteCode: "BETA-ABCDE-FGHJK" });
+  assert.equal(result.profile.betaAccessGrantedAt !== null, true);
+  assert.deepEqual(calls.map(([name]) => name), ["invite", "session"]);
+  assert.equal(calls[0][1].code, "BETA-ABCDE-FGHJK");
+});

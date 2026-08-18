@@ -7,7 +7,7 @@ import { createRequestHandler } from "./http.js";
 import { evaluateReleaseGates } from "./release-gates.js";
 import { MemoryChallengeStore, encodeBase58 } from "./wallet-auth.js";
 
-async function request(config, path, { method = "GET", body, headers = {}, auth, safeBeta } = {}) {
+async function request(config, path, { method = "GET", body, headers = {}, auth, safeBeta, operations } = {}) {
   const response = {
     status: undefined,
     headers: undefined,
@@ -21,7 +21,7 @@ async function request(config, path, { method = "GET", body, headers = {}, auth,
     },
   };
   const gates = evaluateReleaseGates({ config });
-  const handler = createRequestHandler({ config, gates, auth, safeBeta });
+  const handler = createRequestHandler({ config, gates, auth, safeBeta, operations });
   const payload = body === undefined ? [] : [Buffer.from(JSON.stringify(body))];
   const incoming = Readable.from(payload);
   incoming.method = method;
@@ -193,4 +193,74 @@ test("safe-beta guest issuance is rate-limited before creating an identity", asy
   assert.equal(result.response.status, 429);
   assert.equal(result.response.headers["retry-after"], "5");
   assert.equal(issued, false);
+});
+
+test("authenticated players can update profiles, inspect history, and submit reports", async () => {
+  const wallet = encodeBase58(Buffer.alloc(32, 7));
+  const calls = [];
+  const auth = {
+    sessionStore: { authenticate: async () => ({ wallet, expiresAt: "2099-01-01T00:00:00.000Z" }) },
+  };
+  const safeBeta = {
+    updateProfile: async (input) => { calls.push(["profile", input]); return { wallet, displayName: input.input.displayName }; },
+    handHistory: async (input) => { calls.push(["history", input]); return [{ handId: "table:00000000-0000-4000-8000-000000000001:1" }]; },
+    createReport: async (input) => { calls.push(["report", input]); return { id: "report-id", status: "open" }; },
+  };
+  const headers = { origin: "https://play.xpoker.example", authorization: "Bearer test-session" };
+  const profile = await request(config(false), "/v1/beta/profile", {
+    method: "POST",
+    body: { displayName: "River Fox", bio: "Plays the long game", avatarStyle: "river" },
+    headers,
+    auth,
+    safeBeta,
+  });
+  assert.equal(profile.response.status, 200);
+  assert.equal(profile.body.profile.displayName, "River Fox");
+  assert.equal(profile.body.fundsMove, false);
+
+  const history = await request(config(false), "/v1/beta/hands?limit=12", { headers, auth, safeBeta });
+  assert.equal(history.response.status, 200);
+  assert.equal(history.body.hands.length, 1);
+
+  const report = await request(config(false), "/v1/beta/reports", {
+    method: "POST",
+    body: { category: "fairness", details: "Please review the public hand proof." },
+    headers,
+    auth,
+    safeBeta,
+  });
+  assert.equal(report.response.status, 201);
+  assert.equal(report.body.report.status, "open");
+  assert.deepEqual(calls.map(([name]) => name), ["profile", "history", "report"]);
+});
+
+test("operator routes require a session and keep one-time invite codes out of listings", async () => {
+  const wallet = encodeBase58(Buffer.alloc(32, 8));
+  const operations = {
+    overview: async (operatorWallet) => ({ operatorWallet, summary: { players: 4 }, instances: [] }),
+    listInvites: async () => [{ id: "invite-id", label: "Founders", maxUses: 10, useCount: 2 }],
+  };
+  const origin = { origin: "https://play.xpoker.example" };
+  const denied = await request(config(false), "/v1/admin/overview", { headers: origin, operations });
+  assert.equal(denied.response.status, 401);
+
+  const auth = {
+    sessionStore: { authenticate: async () => ({ wallet, expiresAt: "2099-01-01T00:00:00.000Z" }) },
+  };
+  const overview = await request(config(false), "/v1/admin/overview", {
+    headers: { ...origin, authorization: "Bearer operator-session" },
+    auth,
+    operations,
+  });
+  assert.equal(overview.response.status, 200);
+  assert.equal(overview.body.operatorWallet, wallet);
+  assert.equal(overview.body.summary.players, 4);
+
+  const invites = await request(config(false), "/v1/admin/invites", {
+    headers: { ...origin, authorization: "Bearer operator-session" },
+    auth,
+    operations,
+  });
+  assert.equal(invites.response.status, 200);
+  assert.equal(invites.body.invites[0].code, undefined);
 });
