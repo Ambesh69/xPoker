@@ -1,6 +1,12 @@
 name: Backup restore drill
 
 on:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/backup-restore-drill.yml"
+      - "db/**"
+      - "server/restore-verify.js"
   schedule:
     - cron: "17 3 1 * *"
   workflow_dispatch:
