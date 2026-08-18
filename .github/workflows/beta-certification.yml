@@ -15,7 +15,7 @@ concurrency:
 jobs:
   certify:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 15
     services:
       postgres:
         image: postgres:16-alpine
@@ -42,6 +42,10 @@ jobs:
     env:
       DATABASE_URL_TEST: postgresql://postgres:postgres@127.0.0.1:5432/xpoker_certification
       REDIS_URL_TEST: redis://127.0.0.1:6379
+      RUN_SOAK_CERTIFICATION: "1"
+      SOAK_DURATION_MS: "30000"
+      SOAK_TABLE_COUNT: "16"
+      SOAK_P95_LIMIT_MS: "2000"
     steps:
       - uses: actions/checkout@v6
       - uses: actions/setup-node@v6
@@ -49,5 +53,5 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
-      - name: Run zero-value acceptance, concurrency, and failure-injection checks
+      - name: Run zero-value E2E, sustained load, restart, and failure-injection checks
         run: npm run test:certification

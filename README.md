@@ -63,7 +63,7 @@ The repository also contains a fail-closed backend candidate under `server/` and
 - Durable PostgreSQL and Redis adapters, checksum-locked migrations, hash-chained table events and append-only recovery snapshots.
 - Append-only hand events and a per-asset balanced atomic-unit ledger schema.
 - A separately signed release manifest that keeps real-value mode disabled until every audit, certification, infrastructure and regulatory gate is valid.
-- GitHub CI across Node 20/22 with live PostgreSQL 16 and Redis 7.4 integration tests, plus a weekly zero-value acceptance/concurrency/failure-injection certification.
+- GitHub CI across Node 20/22 with live PostgreSQL 16 and Redis 7.4 integration tests, plus a weekly zero-value full-hand, timeout, replica-restart, network-fault, and 30-second soak certification.
 
 Run deterministic checks with `npm test`, the focused zero-value baseline with `npm run test:certification`, dependency checks with `npm run audit`, and a live verified beacon smoke test with `npm run test:beacon`. The current Vercel deployment remains a safe frontend preview; it is not an authoritative game server and no funds move. See [`docs/BETA-CERTIFICATION.md`](docs/BETA-CERTIFICATION.md), [`docs/POKER-RULES-ENGINE.md`](docs/POKER-RULES-ENGINE.md), [`docs/REALTIME-PROTOCOL.md`](docs/REALTIME-PROTOCOL.md), [`docs/SETTLEMENT-PROTOCOL.md`](docs/SETTLEMENT-PROTOCOL.md), and [`docs/PRODUCTION-READINESS.md`](docs/PRODUCTION-READINESS.md).
 
@@ -95,7 +95,7 @@ Real token ownership, purchase, escrow, and settlement remain disabled. A real-v
 2. Canonical mint/contract allowlisting by chain, never ticker-string matching.
 3. xStocks multiplier-aware balances and oracle/RFQ price freshness checks.
 4. An escrow or non-custodial game-settlement contract audited for NLH and PLO side pots, split pots, disconnects, and disputes.
-5. Production wiring for the server-authoritative candidate plus collusion controls, hand-history UX, load/chaos testing, and responsible-gaming limits.
+5. Production wiring for the server-authoritative candidate plus collusion controls, hand-history UX, peak-volume/multi-region exercises, and responsible-gaming limits.
 6. xStocks integrator onboarding for the atomic RFQ flow. A quote returns a ready-to-execute EVM authorization or partially signed Solana transaction; the wallet must execute it before expiry.
 7. Jurisdiction gating, age checks, KYC/AML where required, sanctions screening, gambling licensing analysis, securities/financial-promotion review, tax reporting, and geofencing. xStocks currently excludes several jurisdictions, including the U.S., U.K., Canada, and Australia.
 

@@ -16,7 +16,16 @@ This suite exercises the zero-value beta in a disposable, production-shaped envi
 - Participant-authorized hand history and downloadable audit responses.
 - `fundsMove: false` throughout every player-facing value boundary.
 
-The proof-download route uses a signed synthetic hand-opening transcript. The cryptographic deck, Merkle proof, community-card, showdown, and complete audit-bundle behavior remains covered separately by the real deterministic dealer and rules tests.
+`server/full-gameplay.integration.test.js` extends that path through the real dealer and verifies:
+
+- Encrypted private-card delivery and client-side decryption for two-card NLH and four-card PLO4 hands.
+- Complete preflop, flop, turn, river, showdown, rake, and stack-conservation lifecycles.
+- Consecutive ROE hands rotating from NLH to PLO4 at the configured boundary.
+- Mid-hand WebSocket replacement with PostgreSQL cursor replay before play continues.
+- PostgreSQL timeout-lease claiming, automatic check/fold, exhausted time bank, and hand completion.
+- Participant-authorized downloads of the real completed audit bundle, including deck and Merkle verification.
+
+The shorter acceptance test retains a signed synthetic hand opening so authorization and operator paths remain isolated from gameplay failures. The full-gameplay test uses real deterministic decks and completed proofs.
 
 ## Concurrency and failure injection
 
@@ -31,6 +40,16 @@ It then verifies:
 
 `server/safe-beta-dealer.test.js` also injects a drand-fetch outage after reservation. The hand remains `BEACON_RESERVED`, the table remains `WAITING`, and no deck root or dealer secret is committed.
 
+`server/chaos-certification.integration.test.js` places TCP fault proxies between the application and both state services. It verifies:
+
+- All Redis connections are severed, session access fails during the interruption, and the same session recovers after reconnect.
+- A PostgreSQL table event committed during the Redis outage remains durable even though fanout fails.
+- Ten PostgreSQL queries contend for a two-connection pool while bidirectional latency is injected; pressure and p95 latency must be observable and bounded.
+- Removing the database delay restores the healthy query path.
+- A complete HTTP/WebSocket replica is shut down, a fresh replica is built from PostgreSQL and Redis, the existing session reconnects, missed events replay, and a new command commits.
+
+`server/soak-certification.integration.test.js` runs 16 tables concurrently for 30 seconds in the scheduled certification workflow. It continuously commits state transitions, requires zero command errors and a p95 below two seconds, then reconstructs every table and verifies every event hash chain. Duration, table count, and the p95 gate are configurable.
+
 ## Running it
 
 Provide empty test services, never production connection strings:
@@ -41,8 +60,16 @@ REDIS_URL_TEST=redis://127.0.0.1:6379 \
 npm run test:certification
 ```
 
-The normal `npm test` run executes these files on every push in the Node 20/22 PostgreSQL 16 and Redis 7.4 matrix. `.github/workflows/beta-certification.yml` repeats the focused certification weekly and on manual dispatch.
+Run the sustained profile locally with explicit bounds:
+
+```bash
+DATABASE_URL_TEST=postgresql://postgres:postgres@127.0.0.1:5432/xpoker_certification \
+RUN_SOAK_CERTIFICATION=1 SOAK_DURATION_MS=30000 SOAK_TABLE_COUNT=16 \
+npm run test:soak
+```
+
+The normal `npm test` run executes the E2E and bounded chaos files on every push in the Node 20/22 PostgreSQL 16 and Redis 7.4 matrix. `.github/workflows/beta-certification.yml` repeats the complete focused certification, including the 30-second soak, weekly and on manual dispatch.
 
 ## Interpretation
 
-A green run is a closed-beta software baseline, not permission to enable money play. It does not replace sustained target-traffic soak tests, network-level packet loss/latency tests, region evacuation, DDoS exercises, independent penetration testing, cryptography/RNG certification, contract audits, or regulatory approval. Those remain release gates.
+A green run is a closed-beta software baseline, not permission to enable money play. The automated profile covers bounded service interruption, latency, replica replacement, and sustained table traffic; it does not replace peak target-volume capacity planning, multi-region evacuation, DDoS exercises, independent penetration testing, cryptography/RNG certification, contract audits, or regulatory approval. Those remain release gates.
