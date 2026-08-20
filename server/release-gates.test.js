@@ -21,7 +21,9 @@ function productionFixture() {
       realValueMode: true,
       databaseUrl: "postgresql://db/xpoker?sslmode=verify-full",
       redisUrl: "rediss://redis.example",
+      redisTransportSecurity: "tls",
       dealerKeyProvider: "aws-kms",
+      dealerKeyReference: "arn:aws:kms:us-east-1:111122223333:key/example",
       solanaRpcUrl: "https://rpc.example",
       settlementCluster: "mainnet-beta",
       settlementProgramId: "14dia6Spfd6qu6Q36caisExYQsLA9si4PqFpqfiQ8Z9S",
@@ -84,4 +86,37 @@ test("a configured HTTPS alert receiver satisfies the monitoring integration gat
   const result = evaluateReleaseGates({ ...fixture, now: new Date("2026-08-17T00:00:00.000Z") });
   assert.equal(result.checks.find((check) => check.name === "monitoring_configured").passed, true);
   assert.equal(result.realValueEnabled, true);
+});
+
+test("Railway private Redis transport requires both an internal hostname and explicit attestation", () => {
+  const fixture = productionFixture();
+  fixture.config.redisUrl = "redis://redis.railway.internal:6379";
+  fixture.config.redisTransportSecurity = "railway-private-network";
+  let result = evaluateReleaseGates({ ...fixture, now: new Date("2026-08-17T00:00:00.000Z") });
+  assert.equal(result.checks.find((check) => check.name === "redis_transport_encrypted").passed, true);
+
+  fixture.config.redisUrl = "redis://redis.attacker.example:6379";
+  result = evaluateReleaseGates({ ...fixture, now: new Date("2026-08-17T00:00:00.000Z") });
+  assert.equal(result.checks.find((check) => check.name === "redis_transport_encrypted").passed, false);
+});
+
+test("dealer isolation requires a provider reference and no local signing key", () => {
+  const fixture = productionFixture();
+  delete fixture.config.dealerKeyReference;
+  let result = evaluateReleaseGates({ ...fixture, now: new Date("2026-08-17T00:00:00.000Z") });
+  assert.equal(result.checks.find((check) => check.name === "dealer_key_isolated").passed, false);
+
+  fixture.config.dealerKeyReference = "arn:aws:kms:us-east-1:111122223333:key/example";
+  fixture.config.safeBetaSigningKeyPem = "local-private-key";
+  result = evaluateReleaseGates({ ...fixture, now: new Date("2026-08-17T00:00:00.000Z") });
+  assert.equal(result.checks.find((check) => check.name === "dealer_key_isolated").passed, false);
+});
+
+test("GitHub Actions uptime monitoring satisfies the external monitoring gate", () => {
+  const fixture = productionFixture();
+  delete fixture.config.monitoringDsn;
+  fixture.config.externalUptimeProvider = "github-actions";
+  fixture.config.externalUptimeUrl = "https://github.com/Ambesh69/xPoker/actions/workflows/uptime.yml";
+  const result = evaluateReleaseGates({ ...fixture, now: new Date("2026-08-17T00:00:00.000Z") });
+  assert.equal(result.checks.find((check) => check.name === "monitoring_configured").passed, true);
 });

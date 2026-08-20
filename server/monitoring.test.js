@@ -10,6 +10,7 @@ function dependencies() {
       oldest_deadline_ms: 0,
       stalled_tables: 0,
       stalled_beacons: 0,
+      recent_application_incidents: 0,
     },
     waiting: 0,
     deliveries: new Set(),
@@ -103,6 +104,7 @@ test("runtime probes alert once, expose degradation, and emit recovery", async (
     oldest_deadline_ms: 91_000,
     stalled_tables: 1,
     stalled_beacons: 1,
+    recent_application_incidents: 1,
   };
   state.waiting = 3;
   for (let index = 0; index < 5; index += 1) {
@@ -114,6 +116,7 @@ test("runtime probes alert once, expose degradation, and emit recovery", async (
   assert.equal(degraded.status, "degraded");
   assert.deepEqual(degraded.failed.sort(), [
     "action_deadlines",
+    "application_incidents",
     "drand",
     "http_errors",
     "postgres_pool",
@@ -130,6 +133,7 @@ test("runtime probes alert once, expose degradation, and emit recovery", async (
     oldest_deadline_ms: 0,
     stalled_tables: 0,
     stalled_beacons: 0,
+    recent_application_incidents: 0,
   };
   state.waiting = 0;
   for (let index = 0; index < 5; index += 1) {

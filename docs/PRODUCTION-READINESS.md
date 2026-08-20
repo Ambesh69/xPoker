@@ -137,6 +137,12 @@ The following are deliberately not represented as complete:
 - Alert on beacon verification failures, transcript discontinuities, ledger imbalance attempts, repeated aborts, stale xStocks data, settlement divergence, elevated authentication failures and geofence/identity-provider outages.
 - Secrets rotate without downtime; dealer/release keys have separate principals and approval paths.
 
+## Transport and dealer-key boundaries
+
+PostgreSQL must use `sslmode=require` or `sslmode=verify-full`. Railway's PostgreSQL image generates a private CA and a server certificate for `localhost`, so internal `postgres.railway.internal` clients use `sslmode=require&uselibpqcompat=true`; service authentication and the second encryption layer come from Railway's isolated WireGuard network. Redis must use `rediss://`, or—only on Railway—an internal `*.railway.internal` hostname paired with `REDIS_TRANSPORT_SECURITY=railway-private-network`. The release gate validates both the hostname and the explicit attestation.
+
+`DEALER_KEY_PROVIDER` is not an honor-system flag. AWS KMS or Vault also requires `DEALER_KEY_REFERENCE`, while `remote-signer` requires an authenticated `DEALER_SIGNER_URL` and `DEALER_SIGNER_TOKEN`. The gate remains closed if either `DEALER_SIGNING_KEY_PEM` or `SAFE_BETA_SIGNING_KEY_PEM` is present in the API process. The dedicated signer image is defined by `Dockerfile.signer` and `railway.signer.json`; migrate the existing sealed safe-beta key during a maintenance window without rotating it or exposing it in logs, chat, or repository history.
+
 ## Local verification
 
 ```bash

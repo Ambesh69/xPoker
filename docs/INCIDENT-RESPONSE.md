@@ -4,7 +4,7 @@ Status: operational runbook for the zero-value safe beta. It is not evidence of 
 
 ## Detection and notification
 
-Every API replica runs a 15-second operational probe loop. `/health/ops` exposes only coarse check state for the public uptime monitor; it does not expose database addresses, player identities, secrets, table identifiers, or alert context. A non-healthy result makes the five-minute GitHub uptime workflow fail, which opens or updates `[ops] Production uptime alert`. Recovery closes that issue automatically.
+Every API replica runs a 15-second operational probe loop. `/health/ops` exposes only coarse check state for the public uptime monitor; it does not expose database addresses, player identities, secrets, table identifiers, or alert context. A non-healthy result makes the five-minute GitHub uptime check open one `[ops] Production uptime alert`. Later degraded checks keep that single issue authoritative without generating repeated failed-run emails or comments. Recovery closes the issue automatically.
 
 The probes cover:
 
@@ -15,6 +15,7 @@ The probes cover:
 - Hands waiting on a reserved drand beacon for more than one minute.
 - Rolling HTTP 5xx and unexpected WebSocket-disconnect rates after a minimum sample size.
 - Dealer/drand, proof-download, timeout-worker, Redis fanout, heartbeat and unexpected HTTP failures.
+- Recent unresolved error/critical application incidents, so the external GitHub receiver sees failures captured inside the runtime.
 
 All failures are counted in bounded metrics and deduplicated in `operations_incidents`. Automated check recovery resolves only incidents whose category begins with `monitor_`; application failures remain open for human review. If `ALERT_WEBHOOK_URL` is configured, one API replica sends a redacted `xpoker-alert/v1` firing or resolved event. Redis provides cross-replica delivery deduplication, with a local fallback during a Redis outage.
 
@@ -76,8 +77,8 @@ Application incidents should be resolved manually only after these checks. Autom
 
 Set a random `METRICS_BEARER_TOKEN` of at least 32 characters to enable `GET /metrics`. The endpoint uses a constant-time hashed bearer comparison and emits Prometheus text with bounded routes and failure categories. Never place this token in frontend code.
 
-`ALERT_WEBHOOK_URL` must be HTTPS. `ALERT_WEBHOOK_TOKEN`, if used, is sent as a bearer token and must be a sealed hosting secret. Alert context is recursively redacted before delivery. The receiver should page a named primary and secondary responder; assigning those people and testing the receiver remain launch-owner responsibilities.
+The production safe beta uses the GitHub Actions uptime workflow as its external receiver. Configure `EXTERNAL_UPTIME_PROVIDER=github-actions` and the HTTPS workflow URL in `EXTERNAL_UPTIME_URL`. Runtime incidents degrade `/health/ops` for a bounded window, opening the same deduplicated issue. `ALERT_WEBHOOK_URL` remains available for a future paging provider; its token must be a sealed secret and alert context is recursively redacted before delivery.
 
 ## Drill
 
-At least quarterly, use a non-production environment to inject Redis interruption, PostgreSQL latency, a replica restart and a drand failure. Confirm firing and resolved notifications, GitHub issue automation, Pit Board state, proof availability and recovery against the targets in this runbook. Store the dated drill report and digest outside the application repository; only independently reviewed evidence may satisfy the release manifest's incident-response gate.
+At least quarterly, use a non-production environment to inject Redis interruption, PostgreSQL latency, a replica restart and a drand failure. Confirm firing and resolved notifications, GitHub issue automation, Pit Board state, proof availability and recovery against the targets in this runbook. The uptime workflow's `simulate_failure` input is a non-disruptive notification drill: it must open one issue while the workflow itself remains successful; a normal follow-up run must close that issue. Store the dated drill report and digest outside the application repository; only independently reviewed evidence may satisfy the release manifest's incident-response gate.

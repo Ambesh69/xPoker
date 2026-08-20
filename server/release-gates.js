@@ -43,11 +43,42 @@ function isSolanaPublicKey(value) {
   }
 }
 
+function parsedUrl(value) {
+  try { return new URL(value); } catch { return undefined; }
+}
+
+function redisTransportEncrypted(config) {
+  const url = parsedUrl(config.redisUrl);
+  if (!url) return false;
+  if (url.protocol === "rediss:") return config.redisTransportSecurity === undefined || config.redisTransportSecurity === "tls";
+  return url.protocol === "redis:"
+    && config.redisTransportSecurity === "railway-private-network"
+    && url.hostname.endsWith(".railway.internal");
+}
+
+function dealerKeyIsolated(config) {
+  if (config.dealerSigningKeyPem || config.safeBetaSigningKeyPem) return false;
+  if (["aws-kms", "vault"].includes(config.dealerKeyProvider)) {
+    return typeof config.dealerKeyReference === "string" && config.dealerKeyReference.length >= 8;
+  }
+  return config.dealerKeyProvider === "remote-signer"
+    && Boolean(config.dealerSignerUrl)
+    && Boolean(config.dealerSignerToken);
+}
+
+function monitoringConfigured(config) {
+  if (config.monitoringDsn || config.alertWebhookUrl) return true;
+  const url = parsedUrl(config.externalUptimeUrl);
+  return config.externalUptimeProvider === "github-actions"
+    && url?.protocol === "https:"
+    && url.hostname === "github.com";
+}
+
 export function evaluateReleaseGates({ config, manifest, now = new Date() }) {
   const checks = [
     ["postgres_tls", config.databaseUrl?.startsWith("postgres") && /sslmode=(require|verify-full)/.test(config.databaseUrl)],
-    ["redis_tls", config.redisUrl?.startsWith("rediss://")],
-    ["dealer_key_isolated", config.dealerKeyProvider === "aws-kms" || config.dealerKeyProvider === "vault"],
+    ["redis_transport_encrypted", redisTransportEncrypted(config)],
+    ["dealer_key_isolated", dealerKeyIsolated(config)],
     ["solana_rpc_tls", config.solanaRpcUrl?.startsWith("https://")],
     ["settlement_mainnet", config.settlementCluster === "mainnet-beta"],
     ["settlement_program_configured", isSolanaPublicKey(config.settlementProgramId)],
@@ -56,7 +87,7 @@ export function evaluateReleaseGates({ config, manifest, now = new Date() }) {
     ["strict_origins", config.allowedOrigins.length > 0 && config.allowedOrigins.every((origin) => origin.startsWith("https://"))],
     ["geofencing_configured", Boolean(config.geofencingProvider)],
     ["identity_controls_configured", Boolean(config.identityProvider)],
-    ["monitoring_configured", Boolean(config.monitoringDsn || config.alertWebhookUrl)],
+    ["monitoring_configured", monitoringConfigured(config)],
     ["asset_allowlist_versioned", /^[a-z0-9][a-z0-9._-]{7,127}$/i.test(config.assetAllowlistVersion ?? "")],
     ["release_manifest_version", manifest?.version === "xpoker-release/v1"],
     ["release_matches_build", manifest?.buildCommit === config.buildCommit && /^[0-9a-f]{40}$/i.test(config.buildCommit ?? "")],

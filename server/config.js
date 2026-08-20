@@ -39,6 +39,23 @@ function optionalSecret(value, label) {
   return value;
 }
 
+function optionalChoice(value, label, choices) {
+  if (!value) return undefined;
+  if (!choices.includes(value)) throw new Error(`${label} must be one of: ${choices.join(", ")}`);
+  return value;
+}
+
+function optionalSignerUrl(value) {
+  if (!value) return undefined;
+  const url = new URL(value);
+  const railwayPrivate = url.protocol === "http:" && url.hostname.endsWith(".railway.internal");
+  if (url.protocol !== "https:" && !railwayPrivate) {
+    throw new Error("DEALER_SIGNER_URL must use HTTPS or Railway private networking");
+  }
+  if (url.username || url.password) throw new Error("DEALER_SIGNER_URL must not contain credentials");
+  return url.href.replace(/\/$/, "");
+}
+
 export function loadConfig(env = process.env) {
   const nodeEnv = env.NODE_ENV ?? "development";
   if (!["development", "test", "production"].includes(nodeEnv)) throw new Error("Invalid NODE_ENV");
@@ -61,8 +78,15 @@ export function loadConfig(env = process.env) {
     instanceId: env.RAILWAY_REPLICA_ID ?? env.RAILWAY_DEPLOYMENT_ID ?? env.HOSTNAME,
     databaseUrl: env.DATABASE_URL,
     redisUrl: env.REDIS_URL,
+    redisTransportSecurity: optionalChoice(env.REDIS_TRANSPORT_SECURITY, "REDIS_TRANSPORT_SECURITY", [
+      "tls",
+      "railway-private-network",
+    ]),
     dealerKeyProvider: env.DEALER_KEY_PROVIDER,
+    dealerKeyReference: env.DEALER_KEY_REFERENCE,
     dealerSigningKeyPem: env.DEALER_SIGNING_KEY_PEM,
+    dealerSignerUrl: optionalSignerUrl(env.DEALER_SIGNER_URL),
+    dealerSignerToken: optionalSecret(env.DEALER_SIGNER_TOKEN, "DEALER_SIGNER_TOKEN"),
     safeBetaSigningKeyPem: env.SAFE_BETA_SIGNING_KEY_PEM,
     solanaRpcUrl: env.SOLANA_RPC_URL,
     settlementCluster: env.SETTLEMENT_CLUSTER,
@@ -74,6 +98,8 @@ export function loadConfig(env = process.env) {
     geofencingProvider: env.GEOFENCING_PROVIDER,
     identityProvider: env.IDENTITY_PROVIDER,
     monitoringDsn: env.MONITORING_DSN,
+    externalUptimeProvider: optionalChoice(env.EXTERNAL_UPTIME_PROVIDER, "EXTERNAL_UPTIME_PROVIDER", ["github-actions"]),
+    externalUptimeUrl: optionalHttpsUrl(env.EXTERNAL_UPTIME_URL, "EXTERNAL_UPTIME_URL"),
     alertWebhookUrl: optionalHttpsUrl(env.ALERT_WEBHOOK_URL, "ALERT_WEBHOOK_URL"),
     alertWebhookToken: optionalSecret(env.ALERT_WEBHOOK_TOKEN, "ALERT_WEBHOOK_TOKEN"),
     metricsBearerToken: optionalSecret(env.METRICS_BEARER_TOKEN, "METRICS_BEARER_TOKEN"),
@@ -106,6 +132,11 @@ export function loadConfig(env = process.env) {
       minimum: 15_000,
       maximum: 900_000,
       label: "MONITOR_STALLED_BEACON_MS",
+    }),
+    monitorApplicationIncidentWindowMs: integer(env.MONITOR_APPLICATION_INCIDENT_WINDOW_MS, 600_000, {
+      minimum: 60_000,
+      maximum: 86_400_000,
+      label: "MONITOR_APPLICATION_INCIDENT_WINDOW_MS",
     }),
     monitorDatabaseLatencyMs: integer(env.MONITOR_DATABASE_LATENCY_MS, 1_000, {
       minimum: 100,

@@ -162,7 +162,7 @@ export class AuthoritativeHandCoordinator {
     const events = await this.store.load(handId);
     const previousEvent = events.at(-1);
     const requestDigest = digest({ type, payload });
-    const event = this.signer.append({
+    const event = await this.signer.append({
       handId,
       type,
       payload,

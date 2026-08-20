@@ -137,11 +137,13 @@ export async function createAuthoritativeRuntime({
       rateLimiter: new RedisRateLimiter(redis),
       sessionStore: new RedisSessionStore(redis),
     });
-    const safeBetaDealer = config.safeBetaMode ? createSafeBetaDealer({
+    const safeBetaDealer = config.safeBetaMode ? await createSafeBetaDealer({
       pool,
       redis,
       tableCoordinator,
       signingKeyPem: config.safeBetaSigningKeyPem,
+      signerUrl: config.dealerSignerUrl,
+      signerToken: config.dealerSignerToken,
       nodeEnv: config.nodeEnv,
       logger: operationalLogger,
     }) : undefined;

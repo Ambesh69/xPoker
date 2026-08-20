@@ -10,6 +10,15 @@ import { canonicalJson } from "../fairness/protocol.js";
 
 const TRANSCRIPT_VERSION = "xpoker-hand-transcript/v1";
 const GENESIS_HASH = "0".repeat(64);
+const TRANSCRIPT_EVENT_TYPES = new Set([
+  "HAND_OPENED",
+  "PLAYER_COMMITTED",
+  "BEACON_RESERVED",
+  "DECK_COMMITTED",
+  "PUBLIC_CARD_REVEALED",
+  "HAND_COMPLETED",
+  "HAND_ABORTED",
+]);
 
 function hash(value) {
   return createHash("sha256").update(value).digest("hex");
@@ -18,6 +27,31 @@ function hash(value) {
 function signingPayload(event) {
   const { signature: _signature, ...unsigned } = event;
   return Buffer.from(canonicalJson(unsigned), "utf8");
+}
+
+function eventBase({ handId, type, payload, previousEvent, occurredAt, signerKeyId }) {
+  if (!/^[a-z0-9][a-z0-9:_-]{7,127}$/i.test(handId)) throw new Error("Invalid hand id");
+  if (!TRANSCRIPT_EVENT_TYPES.has(type)) throw new Error("Invalid transcript event type");
+  if (!Number.isFinite(Date.parse(occurredAt))) throw new Error("Invalid transcript timestamp");
+  if (previousEvent && Date.parse(occurredAt) < Date.parse(previousEvent.occurredAt)) {
+    throw new Error("Transcript timestamps must be monotonic");
+  }
+  return {
+    version: TRANSCRIPT_VERSION,
+    handId,
+    sequence: previousEvent ? previousEvent.sequence + 1 : 1,
+    type,
+    occurredAt,
+    previousHash: previousEvent ? previousEvent.eventHash : GENESIS_HASH,
+    signerKeyId,
+    payload,
+  };
+}
+
+function eventMatchesRequest(event, input) {
+  const expected = eventBase({ ...input, signerKeyId: event.signerKeyId });
+  const { eventHash: _eventHash, signature: _signature, ...base } = event;
+  return canonicalJson(base) === canonicalJson(expected);
 }
 
 export function transcriptKeyId(publicKey) {
@@ -38,28 +72,82 @@ export class TranscriptSigner {
   }
 
   append({ handId, type, payload, previousEvent, occurredAt = new Date().toISOString() }) {
-    if (!/^[a-z0-9][a-z0-9:_-]{7,127}$/i.test(handId)) throw new Error("Invalid hand id");
-    if (!/^[A-Z][A-Z0-9_]{2,63}$/.test(type)) throw new Error("Invalid transcript event type");
-    if (!Number.isFinite(Date.parse(occurredAt))) throw new Error("Invalid transcript timestamp");
-    if (previousEvent && Date.parse(occurredAt) < Date.parse(previousEvent.occurredAt)) {
-      throw new Error("Transcript timestamps must be monotonic");
-    }
-    const sequence = previousEvent ? previousEvent.sequence + 1 : 1;
-    const previousHash = previousEvent ? previousEvent.eventHash : GENESIS_HASH;
-    const base = {
-      version: TRANSCRIPT_VERSION,
-      handId,
-      sequence,
-      type,
-      occurredAt,
-      previousHash,
-      signerKeyId: this.keyId,
-      payload,
-    };
+    const base = eventBase({ handId, type, payload, previousEvent, occurredAt, signerKeyId: this.keyId });
     const eventHash = hash(signingPayload(base));
     const unsigned = { ...base, eventHash };
     const signature = sign(null, signingPayload(unsigned), this.privateKey).toString("base64url");
     return Object.freeze({ ...unsigned, signature });
+  }
+}
+
+function requestHeaders(token) {
+  return {
+    accept: "application/json",
+    authorization: `Bearer ${token}`,
+    "content-type": "application/json",
+    "user-agent": "xpoker-api/remote-transcript-signer",
+  };
+}
+
+async function requestJson(fetchImpl, url, options, timeoutMs) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(new Error("Remote signer request timed out")), timeoutMs);
+  timer.unref?.();
+  try {
+    const response = await fetchImpl(url, { ...options, signal: controller.signal });
+    if (!response.ok) throw new Error(`Remote signer returned HTTP ${response.status}`);
+    return await response.json();
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+export class RemoteTranscriptSigner {
+  constructor({ url, token, publicKeyPem, fetchImpl = globalThis.fetch, timeoutMs = 2_000 } = {}) {
+    if (!url || !token || token.length < 32) throw new Error("Remote signer URL and strong token are required");
+    if (typeof fetchImpl !== "function") throw new Error("Remote signer requires fetch");
+    this.url = url.replace(/\/$/, "");
+    this.token = token;
+    this.fetchImpl = fetchImpl;
+    this.timeoutMs = timeoutMs;
+    this.publicKey = createPublicKey(publicKeyPem);
+    assertEd25519(this.publicKey);
+    this.keyId = transcriptKeyId(this.publicKey);
+  }
+
+  static async connect({ url, token, fetchImpl = globalThis.fetch, timeoutMs = 2_000 } = {}) {
+    const endpoint = url?.replace(/\/$/, "");
+    if (!endpoint || !token || token.length < 32) throw new Error("Remote signer URL and strong token are required");
+    const record = await requestJson(fetchImpl, `${endpoint}/v1/public-key`, {
+      method: "GET",
+      headers: requestHeaders(token),
+    }, timeoutMs);
+    return new RemoteTranscriptSigner({ url: endpoint, token, publicKeyPem: record.publicKeyPem, fetchImpl, timeoutMs });
+  }
+
+  publicKeyPem() {
+    return this.publicKey.export({ type: "spki", format: "pem" });
+  }
+
+  async append({ handId, type, payload, previousEvent, occurredAt = new Date().toISOString() }) {
+    const input = { handId, type, payload, previousEvent, occurredAt };
+    eventBase({ ...input, signerKeyId: this.keyId });
+    const event = await requestJson(this.fetchImpl, `${this.url}/v1/transcript-events`, {
+      method: "POST",
+      headers: requestHeaders(this.token),
+      body: JSON.stringify(input),
+    }, this.timeoutMs);
+    if (event.signerKeyId !== this.keyId || !eventMatchesRequest(event, input)) {
+      throw new Error("Remote signer response does not match the requested transcript event");
+    }
+    const { signature, eventHash, ...base } = event;
+    if (hash(signingPayload(base)) !== eventHash || !verify(
+      null,
+      signingPayload({ ...base, eventHash }),
+      this.publicKey,
+      Buffer.from(signature, "base64url"),
+    )) throw new Error("Remote signer returned an invalid transcript signature");
+    return Object.freeze(event);
   }
 }
 
@@ -115,4 +203,4 @@ export function verifyTranscript(events, publicKey, { expectedHead, expectedLeng
   }
 }
 
-export { GENESIS_HASH, TRANSCRIPT_VERSION };
+export { GENESIS_HASH, TRANSCRIPT_EVENT_TYPES, TRANSCRIPT_VERSION };

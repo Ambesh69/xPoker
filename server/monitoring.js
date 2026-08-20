@@ -43,7 +43,13 @@ const MONITOR_QUERY = `SELECT
       AND COALESCE(
         (SELECT max(occurred_at) FROM hand_events WHERE hand_id = hands.id),
         started_at
-      ) < now() - ($3::double precision * interval '1 millisecond')) AS stalled_beacons`;
+      ) < now() - ($3::double precision * interval '1 millisecond')) AS stalled_beacons,
+  (SELECT count(*)::integer
+     FROM operations_incidents
+    WHERE resolved_at IS NULL
+      AND severity IN ('critical', 'error')
+      AND category NOT LIKE 'monitor\\_%' ESCAPE '\\'
+      AND last_seen_at > now() - ($4::double precision * interval '1 millisecond')) AS recent_application_incidents`;
 
 function finite(value, fallback = 0) {
   const parsed = Number(value);
@@ -422,6 +428,7 @@ export class RuntimeMonitoring {
           this.config.monitorOverdueGraceMs ?? 30_000,
           this.config.monitorStalledTableMs ?? 120_000,
           this.config.monitorStalledBeaconMs ?? 60_000,
+          this.config.monitorApplicationIncidentWindowMs ?? 600_000,
         ]), "PostgreSQL monitoring probe")),
         timed(within(timeoutMs, this.redis.ping(), "Redis monitoring probe")),
       ]);
@@ -478,10 +485,12 @@ export class RuntimeMonitoring {
         const oldestDeadlineMs = finite(row.oldest_deadline_ms);
         const stalledTables = finite(row.stalled_tables);
         const stalledBeacons = finite(row.stalled_beacons);
+        const recentApplicationIncidents = finite(row.recent_application_incidents);
         this.metrics.setGauge("overdue_action_deadlines", overdueDeadlines);
         this.metrics.setGauge("oldest_action_deadline_ms", oldestDeadlineMs);
         this.metrics.setGauge("stalled_tables", stalledTables);
         this.metrics.setGauge("stalled_beacon_reservations", stalledBeacons);
+        this.metrics.setGauge("recent_application_incidents", recentApplicationIncidents);
         await this.#condition("action_deadlines", overdueDeadlines > 0, {
           severity: "error",
           alertMessage: "One or more poker action deadlines are overdue",
@@ -496,6 +505,14 @@ export class RuntimeMonitoring {
           severity: "critical",
           alertMessage: "One or more hands are stalled waiting for a drand beacon",
           context: { stalledBeacons, thresholdMs: this.config.monitorStalledBeaconMs ?? 60_000 },
+        });
+        await this.#condition("application_incidents", recentApplicationIncidents > 0, {
+          severity: "error",
+          alertMessage: "One or more recent application incidents require operator review",
+          context: {
+            recentApplicationIncidents,
+            windowMs: this.config.monitorApplicationIncidentWindowMs ?? 600_000,
+          },
         });
       }
 

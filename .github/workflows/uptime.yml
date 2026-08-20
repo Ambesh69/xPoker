@@ -4,6 +4,12 @@ on:
   schedule:
     - cron: "*/5 * * * *"
   workflow_dispatch:
+    inputs:
+      simulate_failure:
+        description: "Exercise alert open/close automation without disrupting production"
+        required: false
+        default: false
+        type: boolean
 
 permissions:
   contents: read
@@ -21,8 +27,14 @@ jobs:
       - name: Check frontend and authoritative API
         id: production_check
         continue-on-error: true
+        env:
+          SIMULATE_FAILURE: ${{ inputs.simulate_failure || 'false' }}
         run: |
           set -euo pipefail
+          if [[ "$SIMULATE_FAILURE" == "true" ]]; then
+            echo "Synthetic incident-response drill requested"
+            exit 42
+          fi
           curl --fail --silent --show-error --retry 2 --max-time 15 https://xpoker.vercel.app/ >/dev/null
           curl --fail --silent --show-error --retry 2 --max-time 15 https://xpoker-api-production.up.railway.app/health/ready >ready.json
           curl --fail --silent --show-error --retry 2 --max-time 15 https://xpoker-api-production.up.railway.app/health/ops >ops.json
@@ -43,7 +55,8 @@ jobs:
               state: "open",
             });
             const existing = data.find((issue) => issue.title === title);
-            const body = `Production or operational-health checks failed at ${new Date().toISOString()}.\n\nRun: ${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}\n\nRunbook: ${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/blob/main/docs/INCIDENT-RESPONSE.md`;
+            const drill = `${{ inputs.simulate_failure || 'false' }}` === "true";
+            const body = `${drill ? "Synthetic incident-response drill" : "Production or operational-health checks failed"} at ${new Date().toISOString()}.\n\nRun: ${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}\n\nRunbook: ${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/blob/main/docs/INCIDENT-RESPONSE.md`;
             if (existing) {
               core.warning(`Production remains degraded; tracking in issue #${existing.number}.`);
             } else {

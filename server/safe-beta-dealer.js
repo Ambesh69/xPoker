@@ -14,7 +14,7 @@ import { fetchVerifiedBeacon, reserveFutureRound } from "./beacon.js";
 import { AuthoritativeHandCoordinator } from "./hand-coordinator.js";
 import { PostgresHandEventStore } from "./postgres-hand-store.js";
 import { nextHandSetup } from "./table-coordinator.js";
-import { TranscriptSigner } from "./transcript.js";
+import { RemoteTranscriptSigner, TranscriptSigner } from "./transcript.js";
 
 const PREPARATION_PREFIX = "xpoker:safe-beta:preparation:";
 const COMMITTED_PREFIX = "xpoker:safe-beta:committed:";
@@ -366,17 +366,30 @@ export class SafeBetaDealer {
   }
 }
 
-export function createSafeBetaDealer({ pool, redis, tableCoordinator, signingKeyPem, nodeEnv, logger = console } = {}) {
+export async function createSafeBetaDealer({
+  pool,
+  redis,
+  tableCoordinator,
+  signingKeyPem,
+  signerUrl,
+  signerToken,
+  nodeEnv,
+  logger = console,
+} = {}) {
   let privateKey = signingKeyPem;
-  if (!privateKey) {
+  let signer;
+  if (signerUrl) {
+    signer = await RemoteTranscriptSigner.connect({ url: signerUrl, token: signerToken });
+  } else if (!privateKey) {
     if (nodeEnv === "production") throw new Error("SAFE_BETA_SIGNING_KEY_PEM is required for a production safe beta");
     privateKey = generateKeyPairSync("ed25519").privateKey;
   }
+  signer ??= new TranscriptSigner(privateKey);
   const dealerStore = new RedisSafeBetaDealerStore(redis);
   const handCoordinator = new AuthoritativeHandCoordinator({
     store: new PostgresHandEventStore({ pool }),
     dealerStore,
-    signer: new TranscriptSigner(privateKey),
+    signer,
     beaconVerifier: async ({ beacon, reservation }) => {
       const verified = await fetchVerifiedBeacon({ reservation });
       return hash(beacon) === hash(verified);

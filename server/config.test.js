@@ -32,11 +32,16 @@ test("monitoring configuration requires HTTPS endpoints and long bearer secrets"
     ALERT_WEBHOOK_URL: "https://alerts.example/xpoker",
     ALERT_WEBHOOK_TOKEN: "a".repeat(32),
     METRICS_BEARER_TOKEN: "m".repeat(32),
+    REDIS_TRANSPORT_SECURITY: "railway-private-network",
+    EXTERNAL_UPTIME_PROVIDER: "github-actions",
+    EXTERNAL_UPTIME_URL: "https://github.com/Ambesh69/xPoker/actions/workflows/uptime.yml",
     MONITOR_HTTP_ERROR_RATE_BPS: "250",
   });
   assert.equal(config.alertWebhookUrl, "https://alerts.example/xpoker");
   assert.equal(config.monitorHttpErrorRate, 0.025);
   assert.equal(config.monitorIntervalMs, 15_000);
+  assert.equal(config.redisTransportSecurity, "railway-private-network");
+  assert.equal(config.externalUptimeProvider, "github-actions");
   assert.throws(
     () => loadConfig({ ALERT_WEBHOOK_URL: "http://alerts.example/xpoker" }),
     /HTTPS/,
@@ -44,5 +49,9 @@ test("monitoring configuration requires HTTPS endpoints and long bearer secrets"
   assert.throws(
     () => loadConfig({ METRICS_BEARER_TOKEN: "short" }),
     /32 to 512/,
+  );
+  assert.throws(
+    () => loadConfig({ REDIS_TRANSPORT_SECURITY: "trust-me" }),
+    /REDIS_TRANSPORT_SECURITY/,
   );
 });
