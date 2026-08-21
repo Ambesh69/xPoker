@@ -81,7 +81,7 @@ ALERT_WEBHOOK_URL=https://<alert receiver>
 ALERT_WEBHOOK_TOKEN=<sealed receiver secret>
 ```
 
-For API-process key isolation, deploy `Dockerfile.signer` as a private service, move the existing PEM to its sealed `DEALER_SIGNING_KEY_PEM`, and configure the API with `DEALER_KEY_PROVIDER=remote-signer`, `DEALER_SIGNER_URL=http://<signer>.railway.internal:<port>`, and the same 32+ character token stored as `SIGNER_AUTH_TOKEN` on the signer and `DEALER_SIGNER_TOKEN` on the API. Remove `SAFE_BETA_SIGNING_KEY_PEM` from the API only after the signer public key ID matches the current transcript key and no hand is in flight. Never rotate merely to perform this migration.
+For API-process key isolation, deploy `Dockerfile.signer` as a private service, move the existing PEM to its sealed `DEALER_SIGNING_KEY_PEM`, and configure the API with `DEALER_KEY_PROVIDER=remote-signer`, `DEALER_SIGNER_URL=http://<signer>.railway.internal:<port>`, and the same 32+ character token stored as `SIGNER_AUTH_TOKEN` on the signer and `DEALER_SIGNER_TOKEN` on the API. Remove `SAFE_BETA_SIGNING_KEY_PEM` from the API only after the signer public key ID matches the current transcript key and no hand is in flight. If the existing sealed key cannot be transferred and a controlled rotation is explicitly approved, first deploy migration `006_dealer_signing_keys.sql` under the old key. Runtime bootstrap records each public verification key and rejects a key change while any old-key hand is nonterminal. Proof downloads include the exact verification key and signed events used by that hand.
 
 Apply migrations before starting the service:
 

@@ -12,9 +12,10 @@ import {
 } from "../fairness/protocol.js";
 import { fetchVerifiedBeacon, reserveFutureRound } from "./beacon.js";
 import { AuthoritativeHandCoordinator } from "./hand-coordinator.js";
+import { PostgresDealerKeyRegistry } from "./dealer-key-registry.js";
 import { PostgresHandEventStore } from "./postgres-hand-store.js";
 import { nextHandSetup } from "./table-coordinator.js";
-import { RemoteTranscriptSigner, TranscriptSigner } from "./transcript.js";
+import { RemoteTranscriptSigner, TranscriptSigner, verifyTranscript } from "./transcript.js";
 
 const PREPARATION_PREFIX = "xpoker:safe-beta:preparation:";
 const COMMITTED_PREFIX = "xpoker:safe-beta:committed:";
@@ -100,6 +101,7 @@ export class SafeBetaDealer {
     tableCoordinator,
     handCoordinator,
     dealerStore,
+    keyRegistry,
     beaconReservation = reserveFutureRound,
     beaconFetch = fetchVerifiedBeacon,
     logger = console,
@@ -112,6 +114,7 @@ export class SafeBetaDealer {
     this.tableCoordinator = tableCoordinator;
     this.handCoordinator = handCoordinator;
     this.dealerStore = dealerStore;
+    this.keyRegistry = keyRegistry;
     this.beaconReservation = beaconReservation;
     this.beaconFetch = beaconFetch;
     this.logger = logger;
@@ -349,12 +352,29 @@ export class SafeBetaDealer {
       throw new Error("Stored hand beacon differs from the independently verified round");
     }
     const transcript = await this.handCoordinator.store.load(handId);
+    const signerKeyIds = [...new Set(transcript.map((event) => event.signerKeyId))];
+    if (signerKeyIds.length !== 1) throw new Error("Completed hand transcript uses inconsistent signing keys");
+    const signerKeyId = signerKeyIds[0];
+    const publicKeyPem = this.keyRegistry
+      ? await this.keyRegistry.publicKeyPem(signerKeyId)
+      : this.handCoordinator.signer.publicKeyPem();
+    const transcriptVerification = verifyTranscript(transcript, publicKeyPem, {
+      expectedHead: transcript.at(-1)?.eventHash,
+      expectedLength: transcript.length,
+    });
+    if (!transcriptVerification.ok) throw new Error("Completed hand transcript signature is invalid");
     return {
       version: "xpoker-safe-beta-audit/v1",
       fundsMove: false,
       beaconSignatureVerified: true,
       transcriptHead: transcript.at(-1)?.eventHash,
       transcriptLength: transcript.length,
+      transcript: {
+        version: "xpoker-hand-transcript-proof/v1",
+        signerKeyId,
+        publicKeyPem,
+        events: transcript,
+      },
       auditBundle: createAuditBundle(committed),
     };
   }
@@ -385,6 +405,8 @@ export async function createSafeBetaDealer({
     privateKey = generateKeyPairSync("ed25519").privateKey;
   }
   signer ??= new TranscriptSigner(privateKey);
+  const keyRegistry = new PostgresDealerKeyRegistry({ pool });
+  await keyRegistry.registerCurrentSigner(signer);
   const dealerStore = new RedisSafeBetaDealerStore(redis);
   const handCoordinator = new AuthoritativeHandCoordinator({
     store: new PostgresHandEventStore({ pool }),
@@ -395,7 +417,7 @@ export async function createSafeBetaDealer({
       return hash(beacon) === hash(verified);
     },
   });
-  return new SafeBetaDealer({ redis, tableCoordinator, handCoordinator, dealerStore, logger });
+  return new SafeBetaDealer({ redis, tableCoordinator, handCoordinator, dealerStore, keyRegistry, logger });
 }
 
 export { RedisSafeBetaDealerStore };

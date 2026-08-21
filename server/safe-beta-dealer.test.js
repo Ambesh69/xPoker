@@ -13,7 +13,7 @@ import {
   AuthoritativeTableCoordinator,
   MemoryTableEventStore,
 } from "./table-coordinator.js";
-import { TranscriptSigner } from "./transcript.js";
+import { TranscriptSigner, verifyTranscript } from "./transcript.js";
 import { encodeBase58 } from "./wallet-auth.js";
 
 function wallet(label) {
@@ -142,6 +142,15 @@ test("safe-beta dealer commits a future beacon deck, privately deals, and settle
   assert.equal(audit.beaconSignatureVerified, true);
   assert.equal(audit.auditBundle.publicRecord.deckRoot, privateDeal.deckRoot);
   assert.match(audit.transcriptHead, /^[0-9a-f]{64}$/);
+  assert.equal(audit.transcript.events.length, audit.transcriptLength);
+  assert.equal(audit.transcript.signerKeyId, audit.transcript.events[0].signerKeyId);
+  assert.equal(
+    verifyTranscript(audit.transcript.events, audit.transcript.publicKeyPem, {
+      expectedHead: audit.transcriptHead,
+      expectedLength: audit.transcriptLength,
+    }).ok,
+    true,
+  );
   await dealer.close();
 });
 
