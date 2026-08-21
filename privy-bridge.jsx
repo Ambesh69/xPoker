@@ -1,6 +1,11 @@
 import React, { useCallback, useEffect, useRef } from "react";
 import { createRoot } from "react-dom/client";
-import { PrivyProvider, useLogin, usePrivy } from "@privy-io/react-auth";
+import {
+  PrivyProvider,
+  useConnectWallet,
+  useLoginWithSiws,
+  usePrivy,
+} from "@privy-io/react-auth";
 import { toSolanaWalletConnectors } from "@privy-io/react-auth/solana";
 
 const appId = document.querySelector('meta[name="xpoker-privy-app-id"]')?.content?.trim();
@@ -14,20 +19,28 @@ function linkedSolanaWallets(user) {
   ));
 }
 
-function preferredSolanaWallet(user, loginAccount) {
+function preferredSolanaWallet(user, loginAccount, walletClientType) {
   const wallets = linkedSolanaWallets(user);
   const loginAddress = loginAccount?.type === "wallet" && loginAccount.chainType === "solana"
     ? loginAccount.address
     : undefined;
   return wallets.find((wallet) => wallet.address === loginAddress)
+    ?? wallets.find((wallet) => wallet.walletClientType === walletClientType)
     ?? wallets.find((wallet) => wallet.walletClientType !== "privy")
     ?? wallets[0];
 }
 
 function friendlyPrivyError(error) {
-  if (error === "exited_auth_flow") return "Privy sign-in was closed.";
+  if (["exited_auth_flow", "exited_connect_wallet_flow", "generic_connect_wallet_error"].includes(error)) return "Wallet sign-in was closed.";
   if (error === "user_rejected") return "The wallet signature was declined.";
-  return "Privy could not complete the Solana sign-in.";
+  return "The Solana wallet could not complete sign-in.";
+}
+
+function signatureBase64(value) {
+  const bytes = value instanceof Uint8Array ? value : new Uint8Array(value ?? []);
+  let binary = "";
+  for (const byte of bytes) binary += String.fromCharCode(byte);
+  return btoa(binary);
 }
 
 function PrivyBridge() {
@@ -39,19 +52,29 @@ function PrivyBridge() {
     getAccessToken,
     logout,
   } = usePrivy();
+  const { generateSiwsMessage, loginWithSiws } = useLoginWithSiws();
 
-  const complete = useCallback(async ({ user, loginMethod, loginAccount }) => {
+  const complete = useCallback(async ({
+    user: authenticatedUser,
+    loginMethod,
+    loginAccount,
+    walletAddress,
+    walletName,
+    walletClientType,
+  }) => {
     try {
-      const wallet = preferredSolanaWallet(user, loginAccount);
+      const wallet = walletAddress
+        ? { address: walletAddress, walletClientType }
+        : preferredSolanaWallet(authenticatedUser, loginAccount, walletClientType);
       if (!wallet) throw new Error("Choose a Solana wallet to enter xPoker.");
       const accessToken = await getAccessToken();
       if (!accessToken) throw new Error("Privy did not return a valid session.");
       pending.current?.resolve({
         accessToken,
         wallet: wallet.address,
-        walletName: wallet.walletClientType && wallet.walletClientType !== "unknown"
+        walletName: walletName || (wallet.walletClientType && wallet.walletClientType !== "unknown"
           ? wallet.walletClientType
-          : loginMethod || "Solana wallet",
+          : loginMethod || "Solana wallet"),
       });
     } catch (error) {
       pending.current?.reject(error);
@@ -60,8 +83,35 @@ function PrivyBridge() {
     }
   }, [getAccessToken]);
 
-  const { login } = useLogin({
-    onComplete: (result) => { void complete(result); },
+  const authenticateConnectedWallet = useCallback(async (wallet) => {
+    try {
+      if (wallet?.type !== "solana" || !wallet.provider?.signMessage) {
+        throw new Error("A Solana wallet with message signing is required.");
+      }
+      const message = await generateSiwsMessage({ address: wallet.address });
+      const signed = await wallet.provider.signMessage({
+        message: new TextEncoder().encode(message),
+      });
+      const authenticatedUser = await loginWithSiws({
+        message,
+        signature: signatureBase64(signed.signature),
+        walletClientType: wallet.walletClientType,
+        connectorType: wallet.connectorType,
+      });
+      await complete({
+        user: authenticatedUser,
+        walletAddress: wallet.address,
+        walletName: wallet.meta?.name,
+        walletClientType: wallet.walletClientType,
+      });
+    } catch (error) {
+      pending.current?.reject(error instanceof Error ? error : new Error(friendlyPrivyError(error)));
+      pending.current = null;
+    }
+  }, [complete, generateSiwsMessage, loginWithSiws]);
+
+  const { connectWallet } = useConnectWallet({
+    onSuccess: ({ wallet }) => { void authenticateConnectedWallet(wallet); },
     onError: (error) => {
       pending.current?.reject(new Error(friendlyPrivyError(error)));
       pending.current = null;
@@ -72,12 +122,22 @@ function PrivyBridge() {
     if (!ready) return undefined;
     const bridge = Object.freeze({
       ready: true,
-      login() {
+      login(walletId) {
         if (pending.current) return Promise.reject(new Error("Privy sign-in is already open."));
+        if (typeof walletId !== "string" || !walletId) return Promise.reject(new Error("Choose a wallet."));
         return new Promise((resolve, reject) => {
           pending.current = { resolve, reject };
-          if (authenticated && user) void complete({ user, loginMethod: "Privy session" });
-          else login();
+          if (authenticated && user) {
+            void complete({ user, loginMethod: "Privy session", walletClientType: walletId });
+            return;
+          }
+          connectWallet({
+            walletList: [walletId],
+            walletChainType: "solana-only",
+            preSelectedWalletId: walletId,
+            hideHeader: true,
+            description: "",
+          });
         });
       },
       logout,
@@ -87,7 +147,7 @@ function PrivyBridge() {
     return () => {
       if (window.xPokerPrivy === bridge) delete window.xPokerPrivy;
     };
-  }, [authenticated, complete, login, logout, ready, user]);
+  }, [authenticated, complete, connectWallet, logout, ready, user]);
 
   return null;
 }
