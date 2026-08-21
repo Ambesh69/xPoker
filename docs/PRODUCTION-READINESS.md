@@ -166,4 +166,4 @@ curl http://127.0.0.1:8787/health/ready
 
 Without signed release evidence, the response reports `safe-preview`. Setting `REAL_VALUE_MODE=enabled` without all gates changes readiness to HTTP 503; it does not enable money play.
 
-For the multiplayer safe beta, set `SAFE_BETA_MODE=enabled`, apply migration `005_beta_operations.sql`, and provide a stable Ed25519 `SAFE_BETA_SIGNING_KEY_PEM` as a sealed production secret. The beta automatically reserves future signature-verified drand rounds and exposes completed reconstruction bundles, but all value paths remain disabled. See [`SAFE-BETA.md`](SAFE-BETA.md) and [`BETA-OPERATIONS.md`](BETA-OPERATIONS.md).
+For the multiplayer safe beta, set `SAFE_BETA_MODE=enabled`, apply migrations through `006_dealer_signing_keys.sql`, and provide a stable Ed25519 signing key as a sealed production secret. The beta automatically reserves future signature-verified drand rounds, preserves append-only public verification keys, and exposes completed reconstruction bundles, but all value paths remain disabled. See [`SAFE-BETA.md`](SAFE-BETA.md) and [`BETA-OPERATIONS.md`](BETA-OPERATIONS.md).

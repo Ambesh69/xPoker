@@ -82,7 +82,7 @@ export async function createAuthoritativeRuntime({
   try {
     await pool.query("SELECT 1");
     const schema = await pool.query("SELECT name FROM schema_migrations ORDER BY name DESC LIMIT 1");
-    if (schema.rows[0]?.name !== "005_beta_operations.sql") {
+    if (schema.rows[0]?.name !== "006_dealer_signing_keys.sql") {
       throw new Error("Database schema is not current; run npm run migrate");
     }
     if (!redis.isOpen) await redis.connect();

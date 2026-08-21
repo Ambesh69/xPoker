@@ -33,16 +33,16 @@ async function verifyHandChains(pool) {
 export async function verifyRestore({ pool } = {}) {
   assert(pool?.query, "A restored PostgreSQL pool is required");
   const migrations = await applyMigrations({ pool });
-  assert(migrations.current === "005_beta_operations.sql", "Restored schema is not current");
+  assert(migrations.current === "006_dealer_signing_keys.sql", "Restored schema is not current");
   assert(migrations.applied.length === 0, "Restore verification must not need to mutate the schema");
 
   const triggers = await pool.query(
     `SELECT tgname
        FROM pg_trigger
       WHERE NOT tgisinternal
-        AND tgname IN ('hand_events_no_update', 'table_events_no_mutation', 'hand_results_no_mutation', 'safe_beta_moderation_events_no_mutation')`,
+        AND tgname IN ('hand_events_no_update', 'table_events_no_mutation', 'hand_results_no_mutation', 'safe_beta_moderation_events_no_mutation', 'dealer_signing_keys_no_mutation')`,
   );
-  assert(triggers.rowCount === 4, "One or more append-only protection triggers are missing");
+  assert(triggers.rowCount === 5, "One or more append-only protection triggers are missing");
 
   const brokenHands = await pool.query(
     `SELECT hand.id
