@@ -3,6 +3,7 @@ import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { canonicalJson } from "../fairness/protocol.js";
 import { normalizeRules, tableView } from "./table-coordinator.js";
 import { decodeBase58, encodeBase58 } from "./wallet-auth.js";
+import { CORE_XSTOCKS } from "./xstocks-holdings.js";
 
 const SAFE_BETA_ALLOWLIST_VERSION = "safe-beta-v1";
 const INVITE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
@@ -86,21 +87,16 @@ function integer(value, label, minimum, maximum) {
   return number;
 }
 
-export const SAFE_BETA_ASSETS = Object.freeze([
-  ["AAPLx", "Apple", 231.42],
-  ["NVDAx", "NVIDIA", 182.19],
-  ["MSFTx", "Microsoft", 516.73],
-  ["AMZNx", "Amazon", 218.64],
-  ["GOOGLx", "Alphabet", 201.88],
-  ["METAx", "Meta", 742.06],
-  ["TSLAx", "Tesla", 338.11],
-  ["NFLXx", "Netflix", 1194.7],
-  ["SPYx", "S&P 500 ETF", 648.23],
-  ["QQQx", "Nasdaq 100 ETF", 576.91],
-].map(([symbol, name, indicativePrice]) => Object.freeze({
+const INDICATIVE_PRICES = Object.freeze({
+  AAPLx: 231.42, NVDAx: 182.19, MSFTx: 516.73, AMZNx: 218.64, GOOGLx: 201.88,
+  METAx: 742.06, TSLAx: 338.11, NFLXx: 1194.7, SPYx: 648.23, QQQx: 576.91,
+});
+
+export const SAFE_BETA_ASSETS = Object.freeze(CORE_XSTOCKS.map(({ symbol, name, mint }) => Object.freeze({
   symbol,
   name,
-  indicativePrice,
+  indicativePrice: INDICATIVE_PRICES[symbol],
+  mainnetMint: mint,
   demoMint: demoMint(symbol),
 })));
 
@@ -176,7 +172,7 @@ function roomView(row) {
 }
 
 export class SafeBetaService {
-  constructor({ pool, sessionStore, tableCoordinator, dealer, operations, inviteRequired = false } = {}) {
+  constructor({ pool, sessionStore, tableCoordinator, dealer, operations, holdingsReader, inviteRequired = false } = {}) {
     if (!pool?.query || !pool?.connect) throw new Error("Safe beta requires PostgreSQL");
     if (!sessionStore?.issue) throw new Error("Safe beta requires a session store");
     if (!tableCoordinator?.state || !tableCoordinator?.seatPlayer) throw new Error("Safe beta requires a table coordinator");
@@ -185,7 +181,13 @@ export class SafeBetaService {
     this.tableCoordinator = tableCoordinator;
     this.dealer = dealer;
     this.operations = operations;
+    this.holdingsReader = holdingsReader;
     this.inviteRequired = inviteRequired;
+  }
+
+  async walletHoldings({ wallet }) {
+    if (!this.holdingsReader) fail("Read-only xStocks holdings are unavailable", 503, "holdings_unavailable");
+    return this.holdingsReader.read(wallet);
   }
 
   async bootstrap() {

@@ -264,6 +264,26 @@ test("authenticated players can update profiles, inspect history, and submit rep
   assert.deepEqual(calls.map(([name]) => name), ["profile", "history", "report"]);
 });
 
+test("authenticated wallet holdings are read-only and bound to the session wallet", async () => {
+  const wallet = encodeBase58(Buffer.alloc(32, 5));
+  const calls = [];
+  const result = await request(config(false), "/v1/beta/wallet/holdings", {
+    headers: { origin: "https://play.xpoker.example", authorization: "Bearer test-session" },
+    auth: { sessionStore: { authenticate: async () => ({ wallet, expiresAt: "2099-01-01T00:00:00.000Z" }) } },
+    safeBeta: {
+      walletHoldings: async (input) => {
+        calls.push(input);
+        return { mode: "read-only", wallet, permissionsRequested: [], holdings: [] };
+      },
+    },
+  });
+  assert.equal(result.response.status, 200);
+  assert.equal(result.body.wallet, wallet);
+  assert.equal(result.body.fundsMove, false);
+  assert.deepEqual(result.body.permissionsRequested, []);
+  assert.deepEqual(calls, [{ wallet }]);
+});
+
 test("operator routes require a session and keep one-time invite codes out of listings", async () => {
   const wallet = encodeBase58(Buffer.alloc(32, 8));
   const operations = {

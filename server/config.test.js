@@ -16,6 +16,8 @@ test("operations configuration validates and deduplicates admin wallets", () => 
   assert.deepEqual(config.adminWallets, [admin]);
   assert.equal(config.betaInviteRequired, true);
   assert.equal(config.instanceId, "replica-2");
+  assert.equal(config.solanaReadRpcUrl, "https://api.mainnet-beta.solana.com/");
+  assert.equal(config.xstocksApiBase, "https://api.xstocks.fi/api/v2");
 });
 
 test("operations configuration rejects malformed admin wallets", () => {
@@ -53,6 +55,10 @@ test("monitoring configuration requires HTTPS endpoints and long bearer secrets"
   assert.throws(
     () => loadConfig({ REDIS_TRANSPORT_SECURITY: "trust-me" }),
     /REDIS_TRANSPORT_SECURITY/,
+  );
+  assert.throws(
+    () => loadConfig({ SOLANA_READ_RPC_URL: "http://rpc.example" }),
+    /HTTPS/,
   );
 });
 

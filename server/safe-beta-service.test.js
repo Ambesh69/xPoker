@@ -13,7 +13,9 @@ test("safe beta exposes exactly ten isolated demo assets and four public rooms",
   assert.equal(SAFE_BETA_ASSETS.length, 10);
   assert.equal(new Set(SAFE_BETA_ASSETS.map((asset) => asset.symbol)).size, 10);
   assert.equal(new Set(SAFE_BETA_ASSETS.map((asset) => asset.demoMint)).size, 10);
+  assert.equal(new Set(SAFE_BETA_ASSETS.map((asset) => asset.mainnetMint)).size, 10);
   assert.ok(SAFE_BETA_ASSETS.every((asset) => decodeBase58(asset.demoMint).length === 32));
+  assert.ok(SAFE_BETA_ASSETS.every((asset) => decodeBase58(asset.mainnetMint).length === 32));
   assert.equal(SAFE_BETA_PUBLIC_ROOMS.length, 4);
   assert.deepEqual(SAFE_BETA_PUBLIC_ROOMS.map((room) => room.tableRules.game), ["NLH", "PLO4", "ROE", "ROE"]);
   assert.ok(SAFE_BETA_PUBLIC_ROOMS.every((room) => room.tableRules.minimumBuyInAtomic === "2000"));

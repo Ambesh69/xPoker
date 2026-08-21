@@ -14,6 +14,7 @@ import { createTimeoutWorker } from "./timeout-worker.js";
 import { SafeBetaService } from "./safe-beta-service.js";
 import { createSafeBetaDealer } from "./safe-beta-dealer.js";
 import { RuntimeMonitoring } from "./monitoring.js";
+import { ReadOnlyXStocksHoldings } from "./xstocks-holdings.js";
 
 function logError(logger, event, error, context = {}) {
   logger.error(JSON.stringify({
@@ -150,12 +151,17 @@ export async function createAuthoritativeRuntime({
     const unsubscribeSafeBetaDealer = safeBetaDealer
       ? tableCoordinator.subscribe(safeBetaDealer.onTableEvent)
       : undefined;
+    const holdingsReader = config.safeBetaMode ? new ReadOnlyXStocksHoldings({
+      rpcUrl: config.solanaReadRpcUrl,
+      apiBase: config.xstocksApiBase,
+    }) : undefined;
     const safeBeta = config.safeBetaMode ? new SafeBetaService({
       pool,
       sessionStore: auth.sessionStore,
       tableCoordinator,
       dealer: safeBetaDealer,
       operations,
+      holdingsReader,
       inviteRequired: config.betaInviteRequired,
     }) : undefined;
     if (safeBeta) await safeBeta.bootstrap();

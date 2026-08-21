@@ -134,6 +134,19 @@ async function handleSafeBeta({ request, response, requestId, url, config, auth,
       sendJson(response, 200, { profile: result, fundsMove: false, requestId }, requestId, cors);
       return;
     }
+    if (url.pathname === "/v1/beta/wallet/holdings" && request.method === "GET") {
+      const rate = await enforceAuthRateLimit({ auth, request, route: "holdings", identity: wallet });
+      if (rate && !rate.allowed) {
+        sendJson(response, 429, { error: "rate_limited", requestId }, requestId, {
+          ...cors,
+          "retry-after": String(Math.max(1, Math.ceil(rate.retryAfterMs / 1_000))),
+        });
+        return;
+      }
+      const result = await safeBeta.walletHoldings({ wallet });
+      sendJson(response, 200, { ...result, fundsMove: false, requestId }, requestId, cors);
+      return;
+    }
     if (url.pathname === "/v1/beta/invitations/redeem" && request.method === "POST") {
       const body = await readJson(request, config.bodyLimitBytes);
       const result = await safeBeta.redeemAccessInvite({ wallet, code: body.code });

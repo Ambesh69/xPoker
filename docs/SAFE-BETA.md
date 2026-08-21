@@ -23,6 +23,7 @@ The safe beta exercises the production-shaped wallet, room, table, dealer, recon
 - Every safe-beta table session has status `preview`. It has no escrow program, vault, deposit signature, withdrawal, or cash-out route.
 - Wallet authentication signs a domain/origin/nonce/expiry-bound message that explicitly authorizes no transaction.
 - Guest identities are random 32-byte public-key-shaped identifiers with expiring Redis sessions. They cannot sign a transaction.
+- A signed wallet may request a rate-limited, read-only Solana mainnet scan of the ten issuer-verified Token-2022 mints. The scan requests no wallet capability, applies the issuer's current Solana multiplier when available, and never affects demo-credit seating.
 - The browser labels every balance, pot, rake result, and buy-in as simulated. Real xStock acquisition is not imitated by the beta.
 
 ## Control-plane API
@@ -32,6 +33,7 @@ All browser routes require an exact `Origin` in `ALLOWED_ORIGINS`. Authenticated
 - `GET /v1/beta/lobby` — public rooms, authorized private rooms, ten demo assets, and the caller's profile.
 - `POST /v1/beta/demo-session` — issue a guest identity when safe-beta mode is enabled.
 - `GET|POST /v1/beta/profile` — read or update a display name, short bio, and avatar style.
+- `GET /v1/beta/wallet/holdings` — read the signed wallet's public Token-2022 accounts for the Core 10 mints; no transaction or wallet approval is created.
 - `POST /v1/beta/invitations/redeem` — redeem a closed-beta access code; PostgreSQL stores only its SHA-256 digest.
 - `POST /v1/beta/rooms` — create a private room with validated blinds, buy-ins, seats, rake, cap, clocks, and ROE rotation.
 - `POST /v1/beta/rooms/join` — join by a one-time-displayed invite code; PostgreSQL stores only SHA-256.
@@ -75,6 +77,8 @@ ALLOWED_ORIGINS=https://<frontend>
 DATABASE_URL=postgresql://...?...sslmode=verify-full
 REDIS_URL=rediss://...
 SAFE_BETA_SIGNING_KEY_PEM=<Ed25519 private key secret>
+SOLANA_READ_RPC_URL=https://api.mainnet-beta.solana.com
+XSTOCKS_API_BASE=https://api.xstocks.fi/api/v2
 METRICS_BEARER_TOKEN=<random 32+ character secret>
 # Optional external notification receiver:
 ALERT_WEBHOOK_URL=https://<alert receiver>

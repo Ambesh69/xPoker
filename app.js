@@ -1,3 +1,5 @@
+import { compatibleWallets, connectAndSign, createWalletRegistry, legacyWallets } from "./wallet-standard.js";
+
 const ASSET_STYLE = {
   AAPLx: ["AA", "#dfe5e0", "+0.8%"], NVDAx: ["NV", "#c9f6a5", "+2.4%"],
   MSFTx: ["MS", "#ccecff", "+0.5%"], AMZNx: ["AZ", "#ffd9a2", "+1.2%"],
@@ -29,6 +31,11 @@ const FALLBACK_ROOMS = [
 const configuredApi = document.querySelector('meta[name="xpoker-api-origin"]')?.content?.trim();
 const API_ORIGIN = (configuredApi || localStorage.getItem("xpoker-api-origin") || (["localhost", "127.0.0.1"].includes(location.hostname) ? "http://127.0.0.1:8787" : "")).replace(/\/$/, "");
 const SESSION_KEY = "xpoker-safe-beta-session";
+const SESSION_META_KEY = "xpoker-safe-beta-session-meta";
+const LAST_WALLET_KEY = "xpoker-last-wallet";
+const walletRegistry = createWalletRegistry(window);
+
+function storedJson(storage, key) { try { return JSON.parse(storage.getItem(key) || "null"); } catch { return null; } }
 const state = {
   view: "lobby", loading: true, backend: API_ORIGIN ? "connecting" : "preview",
   assets: FALLBACK_ASSETS, rooms: FALLBACK_ROOMS, profile: null, token: sessionStorage.getItem(SESSION_KEY),
@@ -37,6 +44,9 @@ const state = {
   reconnectAttempt: 0, holeKey: null, holeCards: [], lastEvent: null, pendingAfterConnect: null, audit: null,
   leaveRequestId: null,
   handHistory: [], operations: null, operationsPlayers: [], operationsReports: [], operationsInvites: [],
+  wallets: [], pendingAccessInvite: "", sessionMeta: storedJson(sessionStorage, SESSION_META_KEY), sessionRecovery: null,
+  holdings: { status: "idle", data: null, error: null }, networkOnline: navigator.onLine,
+  reconnectNextAt: null, reconnectReason: null, lastConnectedAt: null, proofDownload: null,
 };
 
 function escapeHtml(value) { return String(value ?? "").replace(/[&<>'"]/g, (character) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "'": "&#39;", '"': "&quot;" })[character]); }
@@ -53,8 +63,33 @@ async function api(path, { method = "GET", body, authenticated = false } = {}) {
   if (!API_ORIGIN) throw new Error("The authoritative beta server is not configured on this deployment.");
   const response = await fetch(`${API_ORIGIN}${path}`, { method, headers: apiHeaders(authenticated), body: body === undefined ? undefined : JSON.stringify(body) });
   const payload = await response.json().catch(() => ({}));
-  if (!response.ok) { const error = new Error(payload.message || payload.error || `Request failed (${response.status})`); error.status = response.status; throw error; }
+  if (!response.ok) {
+    const error = new Error(payload.message || payload.error || `Request failed (${response.status})`);
+    error.status = response.status;
+    if (authenticated && response.status === 401) clearLocalSession("expired");
+    throw error;
+  }
   return payload;
+}
+
+function clearLocalSession(reason = null) {
+  sessionStorage.removeItem(SESSION_KEY);
+  sessionStorage.removeItem(SESSION_META_KEY);
+  state.token = null;
+  state.profile = null;
+  state.sessionMeta = null;
+  state.sessionRecovery = reason;
+  state.holdings = { status: "idle", data: null, error: null };
+}
+
+function storeSession(result, walletName, wallet) {
+  const meta = { walletName, wallet, issuedAt: result.issuedAt || new Date().toISOString(), expiresAt: result.expiresAt || null };
+  state.token = result.token;
+  state.sessionMeta = meta;
+  state.sessionRecovery = null;
+  sessionStorage.setItem(SESSION_KEY, result.token);
+  sessionStorage.setItem(SESSION_META_KEY, JSON.stringify(meta));
+  if (walletName) localStorage.setItem(LAST_WALLET_KEY, walletName);
 }
 
 function normalizeLobby(payload) {
@@ -68,7 +103,12 @@ function normalizeLobby(payload) {
 async function loadLobby({ quiet = false } = {}) {
   if (!quiet) state.loading = true;
   if (API_ORIGIN) {
-    try { normalizeLobby(await api("/v1/beta/lobby", { authenticated: Boolean(state.token) })); state.backend = "online"; }
+    try {
+      const payload = await api("/v1/beta/lobby", { authenticated: Boolean(state.token) });
+      if (state.token && !payload.profile) clearLocalSession("expired");
+      normalizeLobby(payload);
+      state.backend = "online";
+    }
     catch { state.backend = "unavailable"; if (!quiet) toast("Safe-beta server unavailable. Showing interface preview."); normalizeLobby({}); }
   } else { state.backend = "preview"; normalizeLobby({}); }
   state.loading = false; render();
@@ -86,7 +126,7 @@ function privatePanel() {
   return `<section class="private-panel"><div class="section-head"><div><h2>Your private rooms</h2><p>Membership is stored server-side; invite codes are hashed.</p></div><div class="inline-actions"><button class="btn btn-small" data-action="open-invite">Join code</button><button class="btn btn-small" data-action="open-host">＋ New room</button></div></div><div class="private-list">${privateRooms.length ? privateRooms.map((room, index) => { const limits = roomLimits(room); return `<div class="private-room"><span class="private-icon" style="background:${index % 2 ? "#ccecff" : "#ddd5ff"}">${room.game === "PLO4" ? "4c" : room.game === "ROE" ? "↻" : "2c"}</span><span class="private-copy"><strong>${escapeHtml(room.name)}</strong><span>${gameLabel(room.game)} · ${money(limits.small)} / ${money(limits.big)} · ${room.seatsTaken || 0}/${room.rules.seats} seated</span></span><button class="btn btn-small" data-action="open-buyin" data-room="${room.id}">Open</button></div>`; }).join("") : `<div class="panel-empty"><strong>No private rooms yet.</strong><span>Create one or join with an invite code.</span></div>`}</div></section>`;
 }
 
-function bankrollPanel() { const credits = state.profile ? moneyAtomic(state.profile.demoCreditAtomic) : "$0.00"; return `<aside class="bankroll-panel" id="bankroll"><div class="bankroll-head"><span class="utility-label">Non-withdrawable balance</span><div class="balance">${credits}</div><span class="balance-note">Simulated credits · no monetary value</span></div><div class="bankroll-body">${state.profile ? `<div class="holding">${assetLogo(state.selectedAsset)}<span><strong>SAFE BETA</strong><span>${escapeHtml(state.profile.displayName)}</span></span><span class="holding-value"><strong>${state.profile.isGuest ? "Guest" : "Wallet"}</strong><span>${escapeHtml(shortWallet(state.profile.wallet))}</span></span></div><div class="safety-list"><span>✓ Cannot deposit</span><span>✓ Cannot withdraw</span><span>✓ Cannot settle onchain</span></div><div class="bankroll-actions"><button class="btn btn-small" data-action="open-wallet">Session</button><button class="btn btn-small btn-accent" data-action="quick-seat">Find seat</button></div>` : `<div class="empty-balance"><span class="empty-orbit">0 USD</span><strong>Enter without risking funds.</strong><p>Sign with a Solana wallet, or create an expiring guest identity to test multiplayer.</p><button class="btn btn-primary" data-action="open-wallet">Enter safe beta</button></div>`}</div></aside>`; }
+function bankrollPanel() { const credits = state.profile ? moneyAtomic(state.profile.demoCreditAtomic) : "$0.00"; const detected = state.holdings.data?.detectedCount || 0; return `<aside class="bankroll-panel" id="bankroll"><div class="bankroll-head"><span class="utility-label">Non-withdrawable balance</span><div class="balance">${credits}</div><span class="balance-note">Simulated credits · no monetary value</span></div><div class="bankroll-body">${state.profile ? `<div class="holding">${assetLogo(state.selectedAsset)}<span><strong>SAFE BETA</strong><span>${escapeHtml(state.profile.displayName)}</span></span><span class="holding-value"><strong>${state.profile.isGuest ? "Guest" : "Wallet"}</strong><span>${escapeHtml(shortWallet(state.profile.wallet))}</span></span></div>${state.profile.isGuest ? "" : `<button class="holdings-glance" data-action="open-wallet"><span>Core 10 scan</span><strong>${state.holdings.status === "loading" ? "Reading…" : state.holdings.status === "error" ? "Unavailable" : state.holdings.status === "ready" ? `${detected} detected` : "Ready to read"}</strong><small>Public balance lookup · never used for seating</small></button>`}<div class="safety-list"><span>✓ Cannot deposit</span><span>✓ Cannot withdraw</span><span>✓ Cannot settle onchain</span></div><div class="bankroll-actions"><button class="btn btn-small" data-action="open-wallet">Session receipt</button><button class="btn btn-small btn-accent" data-action="quick-seat">Find seat</button></div>` : `<div class="empty-balance"><span class="empty-orbit">0 USD</span><strong>Enter without risking funds.</strong><p>Sign with a Solana wallet, or create an expiring guest identity to test multiplayer.</p><button class="btn btn-primary" data-action="open-wallet">Enter safe beta</button></div>`}</div></aside>`; }
 
 function lobbyView() { return `<div class="app-shell">${sidebar()}<main class="page">${topbar()}<div class="content"><section class="hero"><div><span class="eyebrow">Authoritative multiplayer · zero-value beta</span><h1>Play the <em>market.</em></h1><p class="hero-copy">Choose an xStock denomination, take a seat with simulated credits, and test real wallet authentication, live table events, and reconnects. No token approval is requested and no funds can move.</p></div><div class="hero-actions"><button class="btn btn-primary" data-action="quick-seat">Find a beta seat</button><button class="btn" data-action="open-host">Host private room</button></div></section><div class="beta-boundary"><span class="boundary-mark">β</span><div><strong>Safe boundary</strong><span>xStock names set the table denomination only. Balances, pots, and rake below are simulated accounting.</span></div><span class="boundary-state">FUNDS MOVE: NO</span></div>${marketRail()}<section><div class="section-head"><div><h2>The public floor</h2><p>Four permanent rooms. Every seat starts from $20 in demo credits.</p></div><span class="tag">NLH · PLO 4 · ROE</span></div><div class="public-grid">${state.rooms.filter((room) => room.visibility === "public").map(roomCard).join("")}</div></section><div class="dashboard-row">${privatePanel()}${bankrollPanel()}</div></div></main></div>`; }
 
@@ -101,7 +141,7 @@ function profileView() {
 function historyPayout(hand) { const payout = hand.result?.payouts?.find((entry) => entry.playerId === state.profile?.wallet); return payout ? moneyAtomic(payout.amountAtomic) : hand.status === "complete" ? "$0.00" : "Pending"; }
 function handHistoryView() {
   const hands = state.handHistory;
-  return pageShell(`<section class="subpage-hero compact-hero"><div><span class="eyebrow">Signed hand archive</span><h1>Your hand <em>tape.</em></h1><p>Completed hands retain their external randomness round, committed deck root, outcome, and downloadable reconstruction bundle.</p></div><button class="btn" data-action="refresh-history">Refresh history</button></section><section class="paper-panel history-panel"><div class="history-head"><span>Hand</span><span>Game</span><span>Result</span><span>Proof</span></div>${hands.length ? hands.map((hand) => `<article class="history-row"><div><strong>#${escapeHtml(hand.handId.split(":").at(-1))} · ${escapeHtml(hand.roomName)}</strong><span>${dateTime(hand.startedAt)} · ${hand.players.length} players</span></div><div><strong>${escapeHtml(gameLabel(hand.game))}</strong><span>drand ${hand.beaconRound || "pending"}</span></div><div><strong>${historyPayout(hand)}</strong><span>Rake ${hand.result ? moneyAtomic(hand.result.rakeAtomic) : "—"}</span></div><div class="history-actions">${hand.auditAvailable ? `<button class="btn btn-small" data-action="view-audit" data-hand="${escapeHtml(hand.handId)}">Verify</button><button class="btn btn-small" data-action="download-audit" data-hand="${escapeHtml(hand.handId)}">Download</button>` : `<span class="status-pill">${escapeHtml(hand.status)}</span>`}<button class="btn btn-small btn-ghost" data-action="open-report" data-hand="${escapeHtml(hand.handId)}">Report</button></div></article>`).join("") : `<div class="panel-empty roomy"><strong>No hands on tape yet.</strong><span>Finish a safe-beta hand and its signed record will appear here.</span><button class="btn btn-accent" data-action="go-lobby">Find a table</button></div>`}</section>`);
+  return pageShell(`<section class="subpage-hero compact-hero"><div><span class="eyebrow">Signed hand archive</span><h1>Your hand <em>tape.</em></h1><p>Completed hands retain their external randomness round, committed deck root, outcome, and portable reconstruction proof.</p></div><button class="btn" data-action="refresh-history">Refresh history</button></section><section class="paper-panel history-panel"><div class="proof-guide"><span class="proof-guide-mark">JSON</span><div><strong>Every completed hand has a portable proof.</strong><small>Verify it in xPoker, or download the complete bundle for independent retention.</small></div><span>Deck root · drand · seeds · reveals · transcript</span></div><div class="history-head"><span>Hand</span><span>Game</span><span>Result</span><span>Proof</span></div>${hands.length ? hands.map((hand) => `<article class="history-row"><div><strong>#${escapeHtml(hand.handId.split(":").at(-1))} · ${escapeHtml(hand.roomName)}</strong><span>${dateTime(hand.startedAt)} · ${hand.players.length} players</span></div><div><strong>${escapeHtml(gameLabel(hand.game))}</strong><span>drand ${hand.beaconRound || "pending"}</span></div><div><strong>${historyPayout(hand)}</strong><span>Rake ${hand.result ? moneyAtomic(hand.result.rakeAtomic) : "—"}</span></div><div class="history-actions">${hand.auditAvailable ? `<button class="btn btn-small" data-action="view-audit" data-hand="${escapeHtml(hand.handId)}">Verify</button><button class="btn btn-small" data-action="download-audit" data-hand="${escapeHtml(hand.handId)}">Save proof</button>` : `<span class="status-pill">${escapeHtml(hand.status)}</span>`}<button class="btn btn-small btn-ghost" data-action="open-report" data-hand="${escapeHtml(hand.handId)}">Report</button></div></article>`).join("") : `<div class="panel-empty roomy"><strong>No hands on tape yet.</strong><span>Finish a safe-beta hand and its signed record will appear here.</span><button class="btn btn-accent" data-action="go-lobby">Find a table</button></div>`}</section>`);
 }
 
 function pulseRail(operations) { const summary = operations?.summary || {}; const instances = operations?.instances || []; const monitor = operations?.monitoring; const healthy = monitor?.status === "healthy"; const headline = !healthy ? "Operational attention required" : instances.length >= 2 ? "Monitored and redundant" : instances.length ? "Monitored on one instance" : "Awaiting heartbeat"; return `<section class="pulse-rail ${healthy ? "" : "pulse-alert"}"><div class="pulse-lead"><span class="pulse-mark"></span><div><span class="utility-label">Table pulse</span><strong>${headline}</strong></div></div><div class="pulse-segment"><small>API instances</small><strong>${instances.length}</strong></div><div class="pulse-segment"><small>Active tables</small><strong>${summary.activeTables || 0}</strong></div><div class="pulse-segment"><small>Error rate</small><strong>${((summary.errorRate || 0) * 100).toFixed(2)}%</strong></div><div class="pulse-instances">${instances.map((instance) => `<span title="${escapeHtml(instance.instanceId)}"><i></i>${escapeHtml(String(instance.buildCommit).slice(0, 7))}</span>`).join("") || "No heartbeat"}</div></section>`; }
@@ -116,32 +156,85 @@ function modalShell({ eyebrow, title, description = "", body, footer = "", wide 
 function openModal(html) { document.querySelector("#modal-root").innerHTML = html; document.body.style.overflow = "hidden"; bindEvents(document.querySelector("#modal-root")); setTimeout(() => document.querySelector(".modal button, .modal input")?.focus(), 0); }
 function closeModal() { document.querySelector("#modal-root").innerHTML = ""; document.body.style.overflow = ""; }
 
-function walletModal(after = null) {
-  state.pendingAfterConnect = after; const serverReady = state.backend === "online";
-  openModal(modalShell({ eyebrow: "Identity, not custody", title: state.profile ? "Your beta session" : "Enter the safe beta", description: "Wallet signatures prove account ownership. They never authorize a token transfer.", body: state.profile ? `<div class="session-card"><span class="wallet-avatar avatar-${escapeHtml(state.profile.avatarStyle || "felt")}">${state.profile.isGuest ? "D" : "W"}</span><div><strong>${escapeHtml(state.profile.displayName)}</strong><span>${escapeHtml(state.profile.wallet)}</span></div><span class="status-pill"><i class="market-dot"></i>${escapeHtml(state.profile.status || "Active")}</span></div><div class="safety-box"><strong>This session can</strong><span>Join beta rooms, send poker actions, and resume a table.</span><strong>This session cannot</strong><span>Spend tokens, approve a program, deposit, withdraw, or cash out.</span></div>` : `<div class="provider-list"><button class="provider" data-action="connect-provider" data-provider="Phantom" ${serverReady ? "" : "disabled"}><span class="provider-logo">PH</span><span><strong>Phantom</strong><span>Connect and sign one domain-bound message</span></span><small>Recommended</small></button><button class="provider" data-action="connect-provider" data-provider="Backpack" ${serverReady ? "" : "disabled"}><span class="provider-logo">BP</span><span><strong>Backpack</strong><span>Connect and sign one domain-bound message</span></span><small>Solana</small></button></div><div class="or-divider"><span>or test without a wallet</span></div><div class="guest-row"><label class="field"><span class="field-label">Display name</span><input class="input" id="guest-name" maxlength="24" value="Market Player" /></label><button class="btn btn-accent" data-action="guest-session" ${serverReady ? "" : "disabled"}>Create guest session</button></div><label class="field optional-invite"><span class="field-label">Closed-beta code <small>if provided</small></span><input class="input" id="guest-invite-code" maxlength="20" placeholder="BETA-XXXXX-XXXXX" autocomplete="off" /></label>${serverReady ? "" : `<div class="preview-fallback"><p class="legal-note warning-note">This deployment is currently the interface preview. Multiplayer and signed sessions need the authoritative API.</p><button class="btn" data-action="preview-session">Open interface preview</button></div>`}`, footer: state.profile ? `<span class="balance-note">Token expires automatically</span><button class="btn" data-action="logout">End session</button>` : `<span class="balance-note">No transaction is created</span><span class="status-pill">Funds move: no</span>` }));
+function walletInitials(name) { return String(name || "Wallet").split(/\s+/).map((part) => part[0]).join("").slice(0, 2).toUpperCase(); }
+function phantomBrowseUrl() { const page = encodeURIComponent(location.href); const ref = encodeURIComponent(location.origin); return `https://phantom.app/ul/browse/${page}?ref=${ref}`; }
+function detectedHolding(symbol) { return state.holdings.data?.holdings?.find((holding) => holding.symbol === symbol); }
+function holdingsReceipt() {
+  if (state.profile?.isGuest) return `<div class="receipt-empty"><strong>Guest identity</strong><span>Onchain holdings are available only after a signed wallet login.</span></div>`;
+  if (state.holdings.status === "loading" || state.holdings.status === "idle") return `<div class="receipt-empty receipt-loading"><strong>Reading the Core 10…</strong><span>One public Solana account lookup. No wallet prompt or permission.</span></div>`;
+  if (state.holdings.status === "error") return `<div class="receipt-empty receipt-warning"><strong>Holdings unavailable</strong><span>${escapeHtml(state.holdings.error || "The read-only source did not respond.")}</span><button class="audit-link" data-action="refresh-holdings">Try again →</button></div>`;
+  const detected = state.holdings.data?.holdings?.filter((holding) => holding.detected) || [];
+  if (!detected.length) return `<div class="receipt-empty"><strong>No Core 10 xStocks detected</strong><span>The wallet is still eligible for every demo-credit table.</span></div>`;
+  return `<div class="receipt-holdings">${detected.map((holding) => `<div>${assetLogo(holding)}<span><strong>${escapeHtml(holding.symbol)}</strong><small>${holding.displayAmount === null ? "Raw balance found · multiplier unavailable" : `${escapeHtml(holding.displayAmount)} shares · read only`}</small></span><span class="receipt-check">Seen</span></div>`).join("")}</div>`;
+}
+function walletSafetyReceipt() {
+  const meta = state.sessionMeta || {};
+  const guest = state.profile?.isGuest;
+  return `<section class="wallet-receipt"><header><span><small>Wallet safety receipt</small><strong>${guest ? "Guest session" : escapeHtml(meta.walletName || "Solana wallet")}</strong></span><span class="receipt-stamp">READ ONLY</span></header><div class="receipt-permissions"><span><i>✓</i><strong>${guest ? "Created" : "Signed"}</strong><small>${guest ? "Expiring guest identity" : "Domain-bound login message"}</small></span><span><i>0</i><strong>Approvals</strong><small>No token permission requested</small></span><span><i>0</i><strong>Transactions</strong><small>No transfer constructed</small></span></div><div class="receipt-ledger"><span>Wallet</span><strong>${escapeHtml(shortWallet(state.profile?.wallet))}</strong><span>Session expires</span><strong>${meta.expiresAt ? dateTime(meta.expiresAt) : "Automatically"}</strong></div><div class="receipt-divider"><span>Core 10 holdings · informational only</span><button class="audit-link" data-action="refresh-holdings" ${guest ? "disabled" : ""}>Refresh</button></div>${holdingsReceipt()}</section>`;
+}
+function walletProviderList(serverReady) {
+  if (!state.wallets.length) return `<div class="wallet-discovery-empty"><span class="empty-wallet-mark">↗</span><div><strong>No browser wallet detected</strong><span>Install or open a Wallet Standard-compatible Solana wallet, then return here.</span></div></div>`;
+  const preferred = localStorage.getItem(LAST_WALLET_KEY);
+  return `<div class="provider-list">${state.wallets.map((wallet, index) => `<button class="provider" data-action="connect-provider" data-provider-index="${index}" ${serverReady ? "" : "disabled"}><span class="provider-logo">${escapeHtml(walletInitials(wallet.name))}</span><span><strong>${escapeHtml(wallet.name)}</strong><span>Connect and sign one login message</span></span><small>${wallet.name === preferred ? "Last used" : "Detected"}</small></button>`).join("")}</div>`;
+}
+function walletModal(after = state.pendingAfterConnect) {
+  state.pendingAfterConnect = after;
+  const priorInvite = document.querySelector("#access-invite-code")?.value;
+  if (priorInvite !== undefined) state.pendingAccessInvite = priorInvite;
+  const serverReady = state.backend === "online";
+  const recovery = state.sessionRecovery === "expired" ? `<div class="recovery-note"><strong>Your previous session expired safely.</strong><span>Reconnect and sign a fresh login message. No table or wallet balance was changed.</span></div>` : "";
+  const canDo = state.profile?.isGuest ? "Join demo rooms, send poker actions, and resume a table." : "Join demo rooms, send poker actions, resume a table, and read the approved ten public token balances.";
+  openModal(modalShell({ eyebrow: "Identity, not custody", title: state.profile ? "Your beta session" : "Enter the safe beta", description: "Wallet signatures prove account ownership. They never authorize a token transfer.", body: state.profile ? `<div data-wallet-modal>${walletSafetyReceipt()}<div class="safety-box"><strong>This session can</strong><span>${canDo}</span><strong>This session cannot</strong><span>Spend tokens, approve a program, deposit, withdraw, or cash out.</span></div></div>` : `<div data-wallet-modal>${recovery}<div class="onboarding-steps"><span><i>1</i><strong>Choose identity</strong><small>Sign one login message</small></span><span><i>2</i><strong>Use invite</strong><small>Optional during beta</small></span><span><i>3</i><strong>Take a seat</strong><small>Demo credits only</small></span></div>${walletProviderList(serverReady)}<div class="mobile-wallet-handoff"><span><strong>On a phone?</strong><small>Open this page inside a wallet browser so Wallet Standard can connect.</small></span><a class="btn btn-small" href="${phantomBrowseUrl()}">Open in Phantom</a><button class="btn btn-small btn-ghost" data-action="copy-site-link">Copy link</button></div><label class="field optional-invite"><span class="field-label">Closed-beta code <small>redeemed after login</small></span><input class="input invite-code-input" id="access-invite-code" maxlength="20" value="${escapeHtml(state.pendingAccessInvite)}" placeholder="BETA-XXXXX-XXXXX" autocomplete="off" /></label><div class="or-divider"><span>or test without a wallet</span></div><div class="guest-row"><label class="field"><span class="field-label">Display name</span><input class="input" id="guest-name" maxlength="24" value="Market Player" /></label><button class="btn btn-accent" data-action="guest-session" ${serverReady ? "" : "disabled"}>Create guest session</button></div>${serverReady ? "" : `<div class="preview-fallback"><p class="legal-note warning-note">This deployment is currently the interface preview. Multiplayer and signed sessions need the authoritative API.</p><button class="btn" data-action="preview-session">Open interface preview</button></div>`}</div>`, footer: state.profile ? `<span class="balance-note">Bearer session stored in this tab only</span><button class="btn" data-action="logout">End session</button>` : `<span class="balance-note">Wallet Standard · message signing only</span><span class="status-pill">Funds move: no</span>` }));
+  if (state.profile && !state.profile.isGuest && state.holdings.status === "idle") loadHoldings();
 }
 
-function providerFor(name) { if (name === "Phantom") return window.phantom?.solana || (window.solana?.isPhantom ? window.solana : null); if (name === "Backpack") return window.backpack?.solana || (window.solana?.isBackpack ? window.solana : null); return null; }
 function bytesToBase64Url(bytes) { let binary = ""; for (const byte of bytes) binary += String.fromCharCode(byte); return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/g, ""); }
 
 async function connectProvider(button) {
-  const providerName = button.dataset.provider; const provider = providerFor(providerName);
-  if (!provider) { toast(`${providerName} was not found in this browser.`); return; }
+  state.pendingAccessInvite = document.querySelector("#access-invite-code")?.value.trim().toUpperCase() || "";
+  const wallet = state.wallets[Number(button.dataset.providerIndex)]; const providerName = wallet?.name;
+  if (!wallet) { toast("That wallet is no longer available. Reopen the wallet menu."); return; }
   button.disabled = true; button.querySelector("small").textContent = "Signing…";
   try {
-    const connection = await provider.connect(); const wallet = String(connection.publicKey || provider.publicKey);
-    const challenge = await api("/v1/auth/challenge", { method: "POST", body: { wallet } });
-    const signed = await provider.signMessage(new TextEncoder().encode(challenge.message), "utf8");
-    const verified = await api("/v1/auth/verify", { method: "POST", body: { id: challenge.id, wallet, signature: bytesToBase64Url(signed.signature || signed) } });
-    state.token = verified.token; sessionStorage.setItem(SESSION_KEY, state.token); closeModal(); await loadLobby({ quiet: true });
-    toast(`${providerName} ownership verified. No transaction was requested.`); resumePendingAction();
+    let challenge;
+    const signed = await connectAndSign(wallet, async (account) => {
+      challenge = await api("/v1/auth/challenge", { method: "POST", body: { wallet: account.address } });
+      return challenge.message;
+    });
+    const walletAddress = signed.account.address;
+    const verified = await api("/v1/auth/verify", { method: "POST", body: { id: challenge.id, wallet: walletAddress, signature: bytesToBase64Url(signed.signature) } });
+    storeSession(verified, providerName, walletAddress);
+    let inviteError;
+    if (state.pendingAccessInvite) {
+      try { await api("/v1/beta/invitations/redeem", { method: "POST", authenticated: true, body: { code: state.pendingAccessInvite } }); }
+      catch (error) { inviteError = error; }
+    }
+    state.pendingAccessInvite = "";
+    closeModal(); await loadLobby({ quiet: true });
+    loadHoldings();
+    if (inviteError) { toast(`${providerName} verified, but the invitation was not accepted: ${inviteError.message}`); state.view = "profile"; render(); }
+    else { toast(`${providerName} ownership verified. No transaction was requested.`); resumePendingAction(); }
   } catch (error) { button.disabled = false; button.querySelector("small").textContent = "Try again"; toast(error.message || "Wallet sign-in failed."); }
+}
+
+async function loadHoldings() {
+  if (!state.profile || state.profile.isGuest || !state.token || state.backend !== "online") return;
+  state.holdings = { status: "loading", data: null, error: null };
+  if (document.querySelector("[data-wallet-modal]")) walletModal(); else render();
+  try {
+    const result = await api("/v1/beta/wallet/holdings", { authenticated: true });
+    state.holdings = { status: "ready", data: result, error: null };
+  } catch (error) {
+    state.holdings = { status: "error", data: null, error: error.message };
+  }
+  if (document.querySelector("[data-wallet-modal]")) walletModal(); else render();
 }
 
 async function createGuestSession() {
   const input = document.querySelector("#guest-name"); const button = document.querySelector('[data-action="guest-session"]');
+  state.pendingAccessInvite = document.querySelector("#access-invite-code")?.value.trim().toUpperCase() || "";
   button.disabled = true; button.textContent = "Creating…";
-  try { const result = await api("/v1/beta/demo-session", { method: "POST", body: { displayName: input.value, inviteCode: document.querySelector("#guest-invite-code")?.value || undefined } }); state.token = result.token; sessionStorage.setItem(SESSION_KEY, state.token); closeModal(); await loadLobby({ quiet: true }); toast("Guest session ready. It has no monetary value."); resumePendingAction(); }
+  try { const result = await api("/v1/beta/demo-session", { method: "POST", body: { displayName: input.value, inviteCode: state.pendingAccessInvite || undefined } }); storeSession(result, "Guest", result.wallet); state.pendingAccessInvite = ""; closeModal(); await loadLobby({ quiet: true }); toast("Guest session ready. It has no monetary value."); resumePendingAction(); }
   catch (error) { button.disabled = false; button.textContent = "Create guest session"; toast(error.message); }
 }
 
@@ -158,12 +251,13 @@ function createPreviewSession() {
   resumePendingAction();
 }
 
-function resumePendingAction() { const pending = state.pendingAfterConnect; state.pendingAfterConnect = null; if (pending === "buyin") buyinModal(state.selectedRoom); if (pending === "host") hostModal(); }
+function resumePendingAction() { const pending = state.pendingAfterConnect; state.pendingAfterConnect = null; if (pending === "buyin") buyinModal(state.selectedRoom); if (pending === "host") hostModal(); if (pending === "invite") inviteModal(); if (pending === "table" && state.tableId) { state.view = "table"; render(); connectRealtime(); } }
 function assetPicker(selectedSymbol) { return `<div class="asset-picker">${state.assets.map((asset) => `<button class="asset-option ${asset.symbol === selectedSymbol ? "selected" : ""}" data-action="select-asset" data-symbol="${asset.symbol}">${assetLogo(asset)}<strong>${asset.symbol}</strong></button>`).join("")}</div>`; }
 
 function buyinModal(room) {
-  state.selectedRoom = room; const limits = roomLimits(room); state.buyInAmount = Math.max(limits.min, Math.min(state.buyInAmount, limits.max)); const asset = assetDetails(state.selectedAsset);
-  openModal(modalShell({ eyebrow: `${gameLabel(room.game)} · ${money(limits.small)} / ${money(limits.big)}`, title: `Take a demo seat at ${escapeHtml(room.name)}`, description: `Min ${money(limits.min)} · Max ${money(limits.max)}. This amount is simulated and non-withdrawable.`, body: `<div class="field"><span class="field-label">Choose table denomination</span>${assetPicker(asset.symbol)}</div><div class="field" style="margin-top:18px"><span class="field-label">Demo buy-in</span><input class="range" id="buyin-range" type="range" min="${limits.min}" max="${limits.max}" step="5" value="${state.buyInAmount}" aria-label="Demo buy-in amount" /><div class="quick-amounts"><button class="btn btn-small" data-action="set-buyin" data-value="${limits.min}">Min ${money(limits.min)}</button><button class="btn btn-small" data-action="set-buyin" data-value="${Math.round((limits.min + limits.max) / 2)}">Mid</button><button class="btn btn-small" data-action="set-buyin" data-value="${limits.max}">Max ${money(limits.max)}</button></div></div><div class="buyin-summary"><span><span>Demo stack</span><strong id="buyin-dollar">${money(state.buyInAmount)}</strong></span><span class="right"><span>Table label</span><strong id="buyin-token">${asset.symbol}</strong></span></div><div class="safety-box compact"><strong>No wallet spend</strong><span>The server records a preview seat and poker stack. It does not inspect or lock your real ${asset.symbol} balance.</span></div>`, footer: `<span class="balance-note">${state.profile ? `${moneyAtomic(state.profile.demoCreditAtomic)} demo credits` : "Identity required"}</span><button class="btn btn-primary" data-action="take-seat">${state.profile ? "Take demo seat" : "Connect & continue"}</button>` }));
+  state.selectedRoom = room; const limits = roomLimits(room); state.buyInAmount = Math.max(limits.min, Math.min(state.buyInAmount, limits.max)); const asset = assetDetails(state.selectedAsset); const holding = detectedHolding(asset.symbol);
+  const holdingNote = !state.profile || state.profile.isGuest ? "No onchain lookup for this identity." : state.holdings.status === "ready" ? holding?.detected ? `${holding.displayAmount ?? "Raw balance"} ${asset.symbol} detected publicly. This does not change your demo stack.` : `No ${asset.symbol} detected. You can still take this demo seat.` : "Open your session receipt to run the optional read-only scan.";
+  openModal(modalShell({ eyebrow: `${gameLabel(room.game)} · ${money(limits.small)} / ${money(limits.big)}`, title: `Take a demo seat at ${escapeHtml(room.name)}`, description: `Min ${money(limits.min)} · Max ${money(limits.max)}. This amount is simulated and non-withdrawable.`, body: `<div class="field"><span class="field-label">Choose table denomination</span>${assetPicker(asset.symbol)}</div><div class="field" style="margin-top:18px"><span class="field-label">Demo buy-in</span><input class="range" id="buyin-range" type="range" min="${limits.min}" max="${limits.max}" step="5" value="${state.buyInAmount}" aria-label="Demo buy-in amount" /><div class="quick-amounts"><button class="btn btn-small" data-action="set-buyin" data-value="${limits.min}">Min ${money(limits.min)}</button><button class="btn btn-small" data-action="set-buyin" data-value="${Math.round((limits.min + limits.max) / 2)}">Mid</button><button class="btn btn-small" data-action="set-buyin" data-value="${limits.max}">Max ${money(limits.max)}</button></div></div><div class="buyin-summary"><span><span>Demo stack</span><strong id="buyin-dollar">${money(state.buyInAmount)}</strong></span><span class="right"><span>Table label</span><strong id="buyin-token">${asset.symbol}</strong></span></div><div class="safety-box compact"><strong>Holding never gates the seat</strong><span>${escapeHtml(holdingNote)} No wallet spend, approval, or token lock is requested.</span></div>`, footer: `<span class="balance-note">${state.profile ? `${moneyAtomic(state.profile.demoCreditAtomic)} demo credits` : "Identity required"}</span><button class="btn btn-primary" data-action="take-seat">${state.profile ? "Take demo seat" : "Connect & continue"}</button>` }));
 }
 
 function hostModal() {
@@ -180,7 +274,7 @@ async function createRoom() {
 }
 
 function inviteCreatedModal(room, code) { openModal(modalShell({ eyebrow: "Room ready", title: escapeHtml(room.name), description: "Copy this code now. Only its digest is retained by the server.", body: `<div class="invite-code">${escapeHtml(code)}</div><div class="safety-box"><strong>Share privately</strong><span>Anyone with this code can join the room membership list. The room still uses demo credits only.</span></div>`, footer: `<button class="btn" data-action="copy-code" data-code="${escapeHtml(code)}">Copy invite</button><button class="btn btn-primary" data-action="open-created-room" data-room="${room.id}">Open room</button>` })); }
-function inviteModal() { if (!state.profile) { walletModal(); return; } openModal(modalShell({ eyebrow: "Private membership", title: "Join with an invite", description: "Codes look like ABCD-2345 and are matched by digest.", body: `<label class="field"><span class="field-label">Invite code</span><input class="input invite-input" id="invite-input" maxlength="9" placeholder="ABCD-2345" autocomplete="off" /></label>`, footer: `<span class="balance-note">Demo rooms only</span><button class="btn btn-primary" data-action="join-code">Join room</button>` })); }
+function inviteModal() { if (!state.profile) { walletModal("invite"); return; } openModal(modalShell({ eyebrow: "Private membership", title: "Join with an invite", description: "Room invitations are matched by digest and never appear in the public lobby.", body: `<div class="invite-path"><span><i>1</i><strong>Enter the room code</strong><small>Format ABCD-2345</small></span><span><i>2</i><strong>Membership is added</strong><small>Bound to ${escapeHtml(shortWallet(state.profile.wallet))}</small></span><span><i>3</i><strong>Choose a demo seat</strong><small>No token approval</small></span></div><label class="field"><span class="field-label">Private room code</span><input class="input invite-input" id="invite-input" maxlength="9" placeholder="ABCD-2345" autocomplete="off" /></label>`, footer: `<span class="balance-note">Demo rooms only · code stored as a digest</span><button class="btn btn-primary" data-action="join-code">Join room</button>` })); }
 async function joinInvite() { const button = document.querySelector('[data-action="join-code"]'); const code = document.querySelector("#invite-input").value; button.disabled = true; try { const result = await api("/v1/beta/rooms/join", { method: "POST", authenticated: true, body: { inviteCode: code } }); closeModal(); await loadLobby({ quiet: true }); toast(`Joined ${result.room.name}.`); } catch (error) { button.disabled = false; toast(error.message); } }
 
 function buyStocksModal(asset = state.selectedAsset) { state.selectedAsset = asset; openModal(modalShell({ eyebrow: "Real asset boundary", title: `Get ${escapeHtml(asset.symbol)}`, description: "Real xStock purchase is intentionally outside the safe multiplayer beta.", body: `<div class="purchase-layout"><div><div class="field"><span class="field-label">Launch asset</span>${assetPicker(asset.symbol)}</div><div class="safety-box"><strong>Why this is paused</strong><span>A production in-app purchase needs xStocks integrator access, live quotes, jurisdiction screening, and a wallet-executed transaction. The beta does not fake any of those steps.</span></div></div><aside class="order-card"><span class="utility-label" style="color:#aebbb4">Current mode</span><div class="order-total">No quote</div><span class="quote-timer">Safe beta · transfers disabled</span><div class="order-row" style="margin-top:20px"><span>Wallet spend</span><strong>Disabled</strong></div><div class="order-row"><span>Table credits</span><strong>Simulated</strong></div><a class="btn btn-accent external-btn" href="https://xstocks.fi/" target="_blank" rel="noopener noreferrer">Visit xStocks ↗</a></aside></div>` })); }
@@ -204,8 +298,16 @@ function tableSeat(seatNumber) {
 }
 
 function fairnessRail() { const hand = state.tableState?.currentHand; const event = state.lastEvent; const completed = state.tableState?.lastResult?.handId; return `<aside class="fairness-rail"><div class="fairness-title"><span class="utility-label">Live hand tape</span><span class="connection-dot ${state.tableConnection}"></span></div><div class="tape-item"><span>Transport</span><strong>${escapeHtml(state.tableConnection)}</strong></div><div class="tape-item"><span>Table seq.</span><strong>${state.tableState?.version ?? 0}</strong></div><div class="tape-item"><span>Deck root</span><strong>${hand?.deckRoot ? `${hand.deckRoot.slice(0, 8)}…${hand.deckRoot.slice(-6)}` : "Waiting"}</strong></div><div class="tape-item"><span>Last event</span><strong>${escapeHtml(event?.type || "Snapshot ready")}</strong></div><div class="tape-note">Community cards include Merkle proofs. A complete post-hand audit is required before a hand is accepted.${completed ? `<button class="audit-link" data-action="view-audit" data-hand="${escapeHtml(completed)}">Verify last hand →</button>` : ""}</div></aside>`; }
+function connectionRecoveryBanner() {
+  if (["live", "preview"].includes(state.tableConnection)) return "";
+  const offline = !state.networkOnline;
+  const title = offline ? "Your device is offline" : state.tableConnection === "reconnecting" ? "Restoring the live table" : "Connecting to the table";
+  const detail = offline ? "Your last confirmed sequence is preserved. Reconnect to the internet and xPoker will replay anything you missed." : `Holding at sequence ${state.tableState?.version ?? 0}. Actions are paused until the server confirms replay.`;
+  return `<div class="reconnect-banner" role="status"><span class="reconnect-spinner"></span><div><strong>${title}</strong><small>${detail}</small></div><span class="reconnect-attempt">${offline ? "WAITING FOR NETWORK" : `ATTEMPT ${Math.max(1, state.reconnectAttempt + 1)}`}</span><button class="btn btn-small" data-action="retry-realtime" ${offline ? "disabled" : ""}>Retry now</button></div>`;
+}
 function actionDock() {
   const current = state.tableState?.currentHand; const legal = current?.legalActions;
+  if (!["live", "preview"].includes(state.tableConnection)) return `<div class="action-dock waiting-dock connection-hold"><span><strong>Actions paused while reconnecting</strong><small>Your last confirmed table state stays visible. No action will be guessed or queued.</small></span><button class="btn" data-action="retry-realtime" ${state.networkOnline ? "" : "disabled"}>Retry</button></div>`;
   if (!current) return `<div class="action-dock waiting-dock"><span><strong>Waiting for players</strong><small>At least two active seats are required before a hand can start.</small></span><button class="btn" data-action="copy-table">Copy table ID</button></div>`;
   if (!legal) return `<div class="action-dock waiting-dock"><span><strong>${current.turn ? `Action on ${escapeHtml(shortWallet(current.turn.playerId))}` : "Dealer resolving the street"}</strong><small>Live events will update this table automatically.</small></span><span class="tag">Hand ${state.tableState.handNumber}</span></div>`;
   const primary = legal.canCheck ? ["check", "Check"] : ["call", `Call ${moneyAtomic(legal.callAmount)}`]; const increase = legal.canRaise || legal.canBet; const min = Number(legal.minimumTarget || 0); const max = Number(legal.maximumTarget || min);
@@ -214,7 +316,7 @@ function actionDock() {
 
 function tableView() {
   const room = state.selectedRoom; const table = state.tableState || previewTableState(); const hand = table.currentHand; const board = hand?.publicReveals?.map((reveal) => reveal.card.code) || []; const potAtomic = hand?.betting?.players?.reduce((sum, player) => sum + Number(player.contributed), 0) || 0; const tableMessage = table.status === "WAITING" ? table.seats.length < 2 ? `${table.seats.length}/${table.rules.seats} seated · waiting for a second player` : `${table.seats.length}/${table.rules.seats} seated · dealer preparing the next fair hand` : hand?.turn ? `Action is on ${shortWallet(hand.turn.playerId)}` : "Dealer is resolving the hand";
-  return `<main class="table-page"><header class="table-bar"><div class="table-title"><button class="icon-btn" data-action="leave-table" aria-label="Leave table">←</button><div><h1>${escapeHtml(room.name)}</h1><span>${gameLabel(hand?.game || room.game)} · ${moneyAtomic(room.rules.smallBlindAtomic)} / ${moneyAtomic(room.rules.bigBlindAtomic)}</span></div></div><div class="table-meta"><span class="tag">Hand #${table.handNumber}</span><span class="tag">Seq ${table.version}</span><span class="tag">${state.selectedAsset.symbol} demo</span><span class="status-pill"><i class="market-dot"></i>No funds</span></div></header><section class="poker-stage"><div class="table-toast">${escapeHtml(tableMessage)}</div>${fairnessRail()}<div class="table-wrap"><div class="poker-table"><div class="pot-center"><span class="utility-label">Demo pot</span><strong>${moneyAtomic(potAtomic)} · ${state.selectedAsset.symbol}</strong><div class="board-cards">${Array.from({ length: 5 }, (_, index) => board[index] ? cardHtml(board[index]) : cardHtml("?", "face-down")).join("")}</div></div></div>${Array.from({ length: Math.min(table.rules.seats, 6) }, (_, index) => tableSeat(index + 1)).join("")}</div>${actionDock()}</section></main>`;
+  return `<main class="table-page"><header class="table-bar"><div class="table-title"><button class="icon-btn" data-action="leave-table" aria-label="Leave table">←</button><div><h1>${escapeHtml(room.name)}</h1><span>${gameLabel(hand?.game || room.game)} · ${moneyAtomic(room.rules.smallBlindAtomic)} / ${moneyAtomic(room.rules.bigBlindAtomic)}</span></div></div><div class="table-meta"><span class="tag">Hand #${table.handNumber}</span><span class="tag">Seq ${table.version}</span><span class="tag">${state.selectedAsset.symbol} demo</span><span class="status-pill"><i class="market-dot"></i>No funds</span></div></header><section class="poker-stage">${connectionRecoveryBanner()}<div class="table-toast">${escapeHtml(tableMessage)}</div>${fairnessRail()}<div class="table-wrap"><div class="poker-table"><div class="pot-center"><span class="utility-label">Demo pot</span><strong>${moneyAtomic(potAtomic)} · ${state.selectedAsset.symbol}</strong><div class="board-cards">${Array.from({ length: 5 }, (_, index) => board[index] ? cardHtml(board[index]) : cardHtml("?", "face-down")).join("")}</div></div></div>${Array.from({ length: Math.min(table.rules.seats, 6) }, (_, index) => tableSeat(index + 1)).join("")}</div>${actionDock()}</section></main>`;
 }
 
 async function showProfile() {
@@ -264,7 +366,29 @@ async function submitReport() { const form = document.querySelector("#report-for
 function moderationModal({ type, id, wallet, status }) { const terminal = ["resolved", "dismissed", "banned"].includes(status); openModal(modalShell({ eyebrow: "Append-only operator action", title: `${status[0].toUpperCase()}${status.slice(1)} ${type}`, description: "The target and your operator wallet will be written to the moderation ledger.", body: `<label class="field"><span class="field-label">Operator note ${terminal ? "· required" : "· optional"}</span><textarea class="input textarea" id="moderation-note" maxlength="1000" ${terminal ? "minlength=3 required" : ""} placeholder="Reason and any follow-up"></textarea></label>`, footer: `<button class="btn" data-action="close-modal">Cancel</button><button class="btn btn-primary" data-action="submit-moderation" data-type="${type}" data-id="${escapeHtml(id || "")}" data-wallet="${escapeHtml(wallet || "")}" data-status="${escapeHtml(status)}">Confirm ${escapeHtml(status)}</button>` })); }
 async function submitModeration(target) { const note = document.querySelector("#moderation-note")?.value || ""; const input = { status: target.dataset.status, note }; const path = target.dataset.type === "report" ? `/v1/admin/reports/${target.dataset.id}` : `/v1/admin/players/${encodeURIComponent(target.dataset.wallet)}`; try { await api(path, { method: "POST", authenticated: true, body: input }); closeModal(); await loadOperations(); toast(`${target.dataset.type === "report" ? "Report" : "Player"} updated.`); } catch (error) { toast(error.message); } }
 async function resolveIncident(id) { try { await api(`/v1/admin/incidents/${id}/resolve`, { method: "POST", authenticated: true, body: {} }); await loadOperations(); toast("Incident marked resolved."); } catch (error) { toast(error.message); } }
-async function downloadAudit(handId) { try { const response = await fetch(`${API_ORIGIN}/v1/beta/hands/${handId}/audit/download`, { headers: apiHeaders(true) }); if (!response.ok) { const body = await response.json().catch(() => ({})); throw new Error(body.message || "Audit download failed"); } const blob = await response.blob(); const link = document.createElement("a"); link.href = URL.createObjectURL(blob); link.download = `xpoker-${handId.replaceAll(":", "-")}-audit.json`; link.click(); URL.revokeObjectURL(link.href); } catch (error) { toast(error.message); } }
+function validProofBundle(payload) { return Boolean(payload?.auditBundle?.publicRecord?.deckRoot && payload?.auditBundle?.publicRecord?.beacon?.round && payload?.transcriptHead); }
+async function downloadAudit(handId) {
+  const buttons = [...document.querySelectorAll('[data-action="download-audit"]')].filter((button) => button.dataset.hand === handId);
+  buttons.forEach((button) => { button.disabled = true; button.dataset.label = button.textContent; button.textContent = "Preparing…"; });
+  state.proofDownload = { handId, status: "preparing" };
+  try {
+    const response = await fetch(`${API_ORIGIN}/v1/beta/hands/${handId}/audit/download`, { headers: apiHeaders(true) });
+    const text = await response.text();
+    let payload; try { payload = JSON.parse(text); } catch { throw new Error("The proof service returned invalid JSON."); }
+    if (!response.ok) throw new Error(payload.message || "Proof download failed");
+    if (!validProofBundle(payload)) throw new Error("The downloaded proof bundle is incomplete and was not saved.");
+    const filename = `xpoker-${handId.replaceAll(":", "-")}-proof.json`;
+    const blob = new Blob([`${JSON.stringify(payload, null, 2)}\n`], { type: "application/json" });
+    const link = document.createElement("a"); link.href = URL.createObjectURL(blob); link.download = filename; link.click(); setTimeout(() => URL.revokeObjectURL(link.href), 1_000);
+    state.proofDownload = { handId, status: "saved", filename };
+    buttons.forEach((button) => { button.textContent = "Saved ✓"; });
+    toast(`Proof saved as ${filename}.`);
+  } catch (error) {
+    state.proofDownload = { handId, status: "error", error: error.message };
+    buttons.forEach((button) => { button.disabled = false; button.textContent = button.dataset.label || "Save proof"; });
+    toast(error.message);
+  }
+}
 
 function render() { const views = { lobby: lobbyView, profile: profileView, history: handHistoryView, operations: operationsView }; document.querySelector("#app").innerHTML = state.loading ? `<div class="app-loading"><span class="brand-mark">xP</span><strong>Opening the safe floor…</strong></div>` : state.view === "table" ? tableView() : (views[state.view] || lobbyView)(); bindEvents(); }
 function requestId(prefix = "web") { return `${prefix}:${crypto.randomUUID()}`; }
@@ -273,11 +397,12 @@ function wsOrigin() { return API_ORIGIN.replace(/^http/, "ws"); }
 
 function connectRealtime() {
   clearTimeout(state.reconnectTimer); if (!state.tableId || !state.token || !API_ORIGIN || state.view !== "table") return;
-  state.socket?.close(1000, "replace connection"); state.tableConnection = "connecting"; render(); const socket = new WebSocket(`${wsOrigin()}/v1/realtime`, "xpoker.v1"); state.socket = socket;
+  if (!navigator.onLine) { state.networkOnline = false; state.tableConnection = "offline"; state.reconnectReason = "browser_offline"; render(); return; }
+  state.networkOnline = true; state.socket?.close(1000, "replace connection"); state.tableConnection = "connecting"; state.reconnectNextAt = null; render(); const socket = new WebSocket(`${wsOrigin()}/v1/realtime`, "xpoker.v1"); state.socket = socket;
   socket.addEventListener("open", () => { state.tableConnection = "authenticating"; sendRealtime({ type: "authenticate", requestId: requestId("auth"), token: state.token }); render(); });
   socket.addEventListener("message", async (event) => {
     let message; try { message = JSON.parse(event.data); } catch { return; }
-    if (message.type === "authenticated") { state.tableConnection = "live"; state.reconnectAttempt = 0; sendRealtime({ type: "subscribe", requestId: requestId("sub"), tableId: state.tableId, afterVersion: state.tableState?.version || 0 }); await beginHoleKeyExchange(); render(); }
+    if (message.type === "authenticated") { state.tableConnection = "live"; state.reconnectAttempt = 0; state.reconnectReason = null; state.reconnectNextAt = null; state.lastConnectedAt = new Date().toISOString(); sendRealtime({ type: "subscribe", requestId: requestId("sub"), tableId: state.tableId, afterVersion: state.tableState?.version || 0 }); await beginHoleKeyExchange(); render(); }
     if (message.type === "table_snapshot") { state.tableState = message.state; render(); }
     if (message.type === "command_result") {
       state.tableState = message.state;
@@ -289,9 +414,38 @@ function connectRealtime() {
     if (message.type === "hole_cards") { try { const payload = await decryptHoleCards(message.envelope); state.holeCards = payload.reveals; render(); } catch { toast("Private cards could not be decrypted. Reconnecting safely."); socket.close(4400, "private deal decrypt failed"); } }
     if (message.type === "error") toast(message.message || "Realtime command failed.");
   });
-  socket.addEventListener("close", (event) => { if (state.socket !== socket) return; state.tableConnection = event.code === 1000 ? "offline" : "reconnecting"; render(); if (state.view === "table" && event.code !== 1000) { const delay = Math.min(10_000, 500 * (2 ** state.reconnectAttempt)); state.reconnectAttempt += 1; state.reconnectTimer = setTimeout(connectRealtime, delay); } });
-  socket.addEventListener("error", () => { state.tableConnection = "reconnecting"; render(); });
+  socket.addEventListener("close", (event) => {
+    if (state.socket !== socket) return;
+    if (!navigator.onLine) {
+      state.tableConnection = "offline";
+      state.reconnectReason = "browser_offline";
+      state.reconnectNextAt = null;
+      render();
+      return;
+    }
+    if (event.code === 4401) {
+      state.tableConnection = "offline";
+      state.reconnectReason = "session_expired";
+      clearLocalSession("expired");
+      state.pendingAfterConnect = "table";
+      render();
+      walletModal("table");
+      return;
+    }
+    state.tableConnection = event.code === 1000 ? "offline" : "reconnecting";
+    state.reconnectReason = event.reason || `socket_${event.code}`;
+    if (state.view === "table" && event.code !== 1000 && navigator.onLine) {
+      const delay = Math.min(10_000, 500 * (2 ** state.reconnectAttempt));
+      state.reconnectAttempt += 1;
+      state.reconnectNextAt = Date.now() + delay;
+      state.reconnectTimer = setTimeout(connectRealtime, delay);
+    }
+    render();
+  });
+  socket.addEventListener("error", () => { state.tableConnection = "reconnecting"; state.reconnectReason = "transport_error"; render(); });
 }
+
+function retryRealtime() { if (!state.networkOnline) return; clearTimeout(state.reconnectTimer); state.reconnectAttempt = 0; connectRealtime(); }
 
 async function beginHoleKeyExchange() {
   if (!crypto.subtle || !state.profile) return;
@@ -312,7 +466,7 @@ function leaveTable() {
   const id = requestId("leave"); state.leaveRequestId = id;
   if (!sendRealtime({ type: "command", command: "leave", requestId: id, tableId: state.tableId, expectedVersion: state.tableState.version, idempotencyKey: requestId("idem") })) state.leaveRequestId = null;
 }
-async function logout() { try { if (state.token && state.backend === "online") await api("/v1/auth/logout", { method: "POST", authenticated: true, body: {} }); } catch {} sessionStorage.removeItem(SESSION_KEY); state.token = null; state.profile = null; state.operations = null; state.view = "lobby"; state.socket?.close(1000, "logout"); closeModal(); await loadLobby({ quiet: true }); toast("Beta session ended."); }
+async function logout() { try { if (state.token && state.backend === "online") await api("/v1/auth/logout", { method: "POST", authenticated: true, body: {} }); } catch {} clearLocalSession(); state.operations = null; state.view = "lobby"; state.socket?.close(1000, "logout"); closeModal(); await loadLobby({ quiet: true }); toast("Beta session ended."); }
 async function viewAudit(handId) {
   if (state.backend !== "online") { toast("A completed authoritative hand is required for an audit."); return; }
   try {
@@ -323,8 +477,8 @@ async function viewAudit(handId) {
       eyebrow: "Post-hand verification",
       title: `Hand #${escapeHtml(handId.split(":").at(-1))} audit passed`,
       description: "The pinned drand round was signature-verified again before returning this bundle.",
-      body: `<div class="audit-grid"><div><span>Deck root</span><strong>${escapeHtml(record.deckRoot)}</strong></div><div><span>Rules hash</span><strong>${escapeHtml(record.rulesHash)}</strong></div><div><span>drand round</span><strong>${record.beacon.round}</strong></div><div><span>Transcript head</span><strong>${escapeHtml(result.transcriptHead)}</strong></div></div><div class="safety-box"><strong>What this proves</strong><span>The revealed seeds reconstruct the committed 52-card deck, the external beacon matches the reserved signed round, and the signed transcript head binds the lifecycle.</span></div>`,
-      footer: `<span class="status-pill"><i class="market-dot"></i>Beacon verified</span><div class="inline-actions"><button class="btn" data-action="download-audit" data-hand="${escapeHtml(handId)}">Download JSON</button><button class="btn" data-action="copy-audit">Copy audit JSON</button></div>`,
+      body: `<div class="audit-grid"><div><span>Deck root</span><strong>${escapeHtml(record.deckRoot)}</strong></div><div><span>Rules hash</span><strong>${escapeHtml(record.rulesHash)}</strong></div><div><span>drand round</span><strong>${record.beacon.round}</strong></div><div><span>Transcript head</span><strong>${escapeHtml(result.transcriptHead)}</strong></div></div><div class="safety-box"><strong>What this proves</strong><span>The revealed seeds reconstruct the committed 52-card deck, the external beacon matches the reserved signed round, and the signed transcript head binds the lifecycle.</span></div><div class="proof-package"><span class="proof-package-icon">↓</span><div><strong>Portable reconstruction proof</strong><span>The saved JSON includes the public record, reveals, transcript bindings, and verification material. Keep it independently of xPoker.</span></div></div>`,
+      footer: `<span class="status-pill"><i class="market-dot"></i>Beacon verified</span><div class="inline-actions"><button class="btn btn-primary" data-action="download-audit" data-hand="${escapeHtml(handId)}">Save proof JSON</button><button class="btn" data-action="copy-audit">Copy JSON</button></div>`,
     }));
   } catch (error) { toast(error.message); }
 }
@@ -343,6 +497,8 @@ function handleAction(event) {
   if (action === "show-profile") showProfile(); if (action === "show-history" || action === "refresh-history") loadHandHistory(); if (action === "show-operations" || action === "refresh-operations") loadOperations();
   if (action === "leave-table") { event.preventDefault(); leaveTable(); }
   if (action === "open-wallet") walletModal(); if (action === "connect-provider") connectProvider(target); if (action === "guest-session") createGuestSession(); if (action === "preview-session") createPreviewSession(); if (action === "logout") logout();
+  if (action === "refresh-holdings") loadHoldings(); if (action === "copy-site-link") { navigator.clipboard?.writeText(location.href); toast("xPoker link copied. Open it inside your mobile wallet browser."); }
+  if (action === "retry-realtime") retryRealtime();
   if (action === "open-host") hostModal(); if (action === "open-invite") inviteModal(); if (action === "join-code") joinInvite();
   if (action === "save-profile") saveProfile(); if (action === "redeem-beta-invite") redeemBetaInvite();
   if (action === "focus-bankroll") document.querySelector("#bankroll")?.scrollIntoView({ behavior: "smooth", block: "center" });
@@ -363,5 +519,25 @@ function handleAction(event) {
 }
 
 document.addEventListener("keydown", (event) => { if (event.key === "Escape" && document.querySelector(".modal-overlay")) closeModal(); });
+function refreshWallets() {
+  state.wallets = compatibleWallets(walletRegistry.get(), legacyWallets(window));
+  if (document.querySelector("[data-wallet-modal]") && !state.profile) walletModal();
+}
+walletRegistry.onChange(refreshWallets);
+window.addEventListener("offline", () => {
+  state.networkOnline = false;
+  if (state.view === "table") {
+    state.tableConnection = "offline";
+    state.reconnectReason = "browser_offline";
+    state.socket?.close(4001, "browser offline");
+    render();
+  }
+});
+window.addEventListener("online", () => {
+  state.networkOnline = true;
+  if (state.view === "table" && state.tableConnection !== "live") retryRealtime();
+});
+refreshWallets();
+setTimeout(refreshWallets, 750);
 render();
 loadLobby();

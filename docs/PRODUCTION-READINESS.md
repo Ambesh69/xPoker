@@ -108,6 +108,7 @@ This candidate is local/devnet-only. It has not been independently audited and i
 - Optional HTTPS alerts are redacted, cross-replica deduplicated and emit both firing and recovery events; the Pit Board exposes the same coarse health state to operators.
 - A scheduled monthly logical-backup drill restores into a clean PostgreSQL database and verifies current migrations, append-only triggers, transcript continuity, table chains, and ledger balance.
 - A disposable closed-beta certification signs generated wallets, enforces invitations, completes NLH/PLO4/ROE hands and proofs, exercises reconnects and timeout leases, replaces an API replica, interrupts Redis, injects PostgreSQL latency/pool pressure, and runs 16 concurrent tables through a bounded soak plus retry, contention, and drand-outage checks.
+- Authenticated wallet sessions can request an optional read-only Solana mainnet scan limited to the ten issuer-verified xStocks mints. The scan uses Token-2022 account reads plus the issuer's public Solana multiplier, requests no wallet permission, and never affects demo credits or seat eligibility.
 
 ## xStocks-specific invariants
 
@@ -119,10 +120,10 @@ Prices are never used past a configured freshness limit. RFQ authorizations are 
 
 The following are deliberately not represented as complete:
 
-1. Complete frontend Wallet Standard/API integration; the transport, recovery, timers, ROE scheduling, encrypted envelopes and deterministic randomized tests are implemented.
+1. Complete mobile-wallet interoperability beyond Wallet Standard discovery and the supported wallet-browser handoff; the transport, recovery, timers, ROE scheduling, encrypted envelopes and deterministic randomized tests are implemented.
 2. Independent audit of the Solana escrow program plus an audited multisig/attestation, dispute watcher and upgrade/governance process.
 3. Production attested-dealer wiring for the implemented encrypted hole-card transport, plus dealer key isolation/remote attestation.
-4. Frontend integration with Wallet Standard and the production API/realtime service.
+4. Production UX validation across the supported Wallet Standard desktop and mobile wallet matrix.
 5. xStocks integrator credentials and atomic RFQ integration.
 6. KYC/age, sanctions, geofencing, responsible-gaming limits, self-exclusion and jurisdiction-specific reporting.
 7. Independent application, cryptography and contract audits; penetration testing; RNG/game certification; and legal approval for each launch jurisdiction.

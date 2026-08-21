@@ -14,7 +14,7 @@ No frontend build step is required. Without the authoritative API, the site rema
 
 ## Safe multiplayer beta
 
-The current client and server now provide real Solana wallet challenge signing, expiring guest sessions, four permanent public rooms, hashed-invite private rooms, closed-beta access codes, player profiles, hand history and proof downloads, player reporting/moderation, an operator dashboard, idempotent table seating, authenticated WebSocket reconnects, encrypted private cards, automatic NLH/PLO 4/ROE hands using a future verified drand round, and post-hand audit retrieval. Demo credits are isolated from the real-value ledger and have no deposit, withdrawal, escrow, settlement, or cash-out path.
+The current client and server now provide Wallet Standard discovery with real Solana wallet challenge signing, expiring guest sessions, an optional read-only Core 10 holdings receipt, four permanent public rooms, hashed-invite private rooms, closed-beta access codes, player profiles, portable proof downloads, player reporting/moderation, an operator dashboard, idempotent table seating, replay-safe WebSocket reconnects, encrypted private cards, automatic NLH/PLO 4/ROE hands using a future verified drand round, and post-hand audit retrieval. Demo credits are isolated from the real-value ledger and have no deposit, withdrawal, escrow, settlement, or cash-out path.
 
 Run the complete service with PostgreSQL and Redis after copying `.env.example`:
 
@@ -91,9 +91,9 @@ This is a product allowlist, not a claim that xStocks publishes an official top-
 
 Real token ownership, purchase, escrow, and settlement remain disabled. A real-value production release needs:
 
-1. A wallet adapter and signed wallet-ownership challenge.
+1. Cross-wallet production validation for the Wallet Standard login and wallet-browser handoff.
 2. Canonical mint/contract allowlisting by chain, never ticker-string matching.
-3. xStocks multiplier-aware balances and oracle/RFQ price freshness checks.
+3. Settlement-grade xStocks balance snapshots and oracle/RFQ price freshness checks. The safe beta's current holdings receipt is informational only.
 4. An escrow or non-custodial game-settlement contract audited for NLH and PLO side pots, split pots, disconnects, and disputes.
 5. Production wiring for the server-authoritative candidate plus collusion controls, hand-history UX, peak-volume/multi-region exercises, and responsible-gaming limits.
 6. xStocks integrator onboarding for the atomic RFQ flow. A quote returns a ready-to-execute EVM authorization or partially signed Solana transaction; the wallet must execute it before expiry.
