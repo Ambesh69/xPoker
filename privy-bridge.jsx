@@ -10,6 +10,33 @@ import { toSolanaWalletConnectors } from "@privy-io/react-auth/solana";
 
 const appId = document.querySelector('meta[name="xpoker-privy-app-id"]')?.content?.trim();
 const rootElement = document.querySelector("#privy-root");
+const walletLabels = Object.freeze({
+  phantom: "Phantom",
+  solflare: "Solflare",
+  backpack: "Backpack",
+  wallet_connect_qr_solana: "WalletConnect",
+});
+
+function openPreselectedWallet(walletId) {
+  const label = walletLabels[walletId];
+  if (!label) return;
+  let observer;
+  let timeout;
+  const select = () => {
+    const dialog = document.querySelector("#privy-dialog");
+    const walletButton = [...(dialog?.querySelectorAll("button") ?? [])].find((button) => (
+      !button.disabled && button.textContent?.trim() === label
+    ));
+    if (!walletButton) return;
+    observer?.disconnect();
+    clearTimeout(timeout);
+    walletButton.click();
+  };
+  observer = new MutationObserver(select);
+  observer.observe(document.body, { childList: true, subtree: true });
+  timeout = window.setTimeout(() => observer.disconnect(), 4_000);
+  queueMicrotask(select);
+}
 
 function linkedSolanaWallets(user) {
   return (user?.linkedAccounts ?? []).filter((account) => (
@@ -138,6 +165,7 @@ function PrivyBridge() {
             hideHeader: true,
             description: "",
           });
+          openPreselectedWallet(walletId);
         });
       },
       logout,
