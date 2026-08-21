@@ -155,3 +155,28 @@ test("a remote-signer manifest is bound to the key observed by the live runtime"
   });
   assert.equal(result.checks.find((check) => check.name === "release_matches_dealer_key").passed, false);
 });
+
+test("unset optional settlement fields match explicit empty manifest fields", () => {
+  const fixture = productionFixture();
+  fixture.config.settlementCluster = "devnet";
+  delete fixture.config.settlementProgramId;
+  delete fixture.config.settlementProgramBinarySha256;
+  delete fixture.config.settlementUpgradeAuthority;
+  const { signature: _signature, ...unsigned } = fixture.manifest;
+  unsigned.settlementProgram = {
+    cluster: "devnet",
+    programId: "",
+    binarySha256: "",
+    upgradeAuthority: "",
+  };
+  fixture.manifest = {
+    ...unsigned,
+    signature: sign(null, Buffer.from(canonicalJson(unsigned)), fixture.authority.privateKey).toString("base64url"),
+  };
+  const result = evaluateReleaseGates({
+    config: fixture.config,
+    manifest: fixture.manifest,
+    now: new Date("2026-08-17T00:00:00.000Z"),
+  });
+  assert.equal(result.checks.find((check) => check.name === "release_matches_settlement").passed, true);
+});

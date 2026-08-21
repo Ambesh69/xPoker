@@ -69,6 +69,10 @@ function dealerKeyMatches(config, manifest, runtimeAttestations) {
   return false;
 }
 
+function optionalMatches(manifestValue, configuredValue) {
+  return (manifestValue ?? "") === (configuredValue ?? "");
+}
+
 export function evaluateReleaseGates({ config, manifest, runtimeAttestations, now = new Date() }) {
   const checks = [
     ["postgres_tls", config.databaseUrl?.startsWith("postgres") && /sslmode=(require|verify-full)/.test(config.databaseUrl)],
@@ -88,10 +92,10 @@ export function evaluateReleaseGates({ config, manifest, runtimeAttestations, no
     ["release_matches_build", manifest?.buildCommit === config.buildCommit && /^[0-9a-f]{40}$/i.test(config.buildCommit ?? "")],
     ["release_matches_asset_allowlist", manifest?.runtime?.assetAllowlistVersion === config.assetAllowlistVersion],
     ["release_matches_dealer_key", dealerKeyMatches(config, manifest, runtimeAttestations)],
-    ["release_matches_settlement", manifest?.settlementProgram?.cluster === config.settlementCluster
-      && manifest?.settlementProgram?.programId === config.settlementProgramId
-      && manifest?.settlementProgram?.binarySha256 === config.settlementProgramBinarySha256
-      && manifest?.settlementProgram?.upgradeAuthority === config.settlementUpgradeAuthority],
+    ["release_matches_settlement", optionalMatches(manifest?.settlementProgram?.cluster, config.settlementCluster)
+      && optionalMatches(manifest?.settlementProgram?.programId, config.settlementProgramId)
+      && optionalMatches(manifest?.settlementProgram?.binarySha256, config.settlementProgramBinarySha256)
+      && optionalMatches(manifest?.settlementProgram?.upgradeAuthority, config.settlementUpgradeAuthority)],
     ["release_manifest_signature", verifyReleaseManifestSignature(manifest, config.releaseAuthorityPublicKeyPem)],
     ["application_security_audit", evidencePassed(manifest?.evidence?.applicationSecurityAudit, now)],
     ["cryptography_audit", evidencePassed(manifest?.evidence?.cryptographyAudit, now)],
