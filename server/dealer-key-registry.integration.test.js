@@ -12,7 +12,13 @@ const connectionString = process.env.DATABASE_URL_TEST;
 test("dealer key registry preserves old verification keys and blocks in-flight rotation", {
   skip: !connectionString,
 }, async () => {
-  const pool = await createPostgresPool({ connectionString });
+  const controlPool = await createPostgresPool({ connectionString });
+  const schema = "dealer_key_registry_test";
+  await controlPool.query(`DROP SCHEMA IF EXISTS ${schema} CASCADE`);
+  await controlPool.query(`CREATE SCHEMA ${schema}`);
+  const isolatedUrl = new URL(connectionString);
+  isolatedUrl.searchParams.set("options", `-c search_path=${schema}`);
+  const pool = await createPostgresPool({ connectionString: isolatedUrl.toString() });
   await applyMigrations({ pool });
   const roomId = "30000000-0000-4000-8000-000000000006";
   await pool.query(
@@ -74,4 +80,6 @@ test("dealer key registry preserves old verification keys and blocks in-flight r
     /append-only/i,
   );
   await pool.end();
+  await controlPool.query(`DROP SCHEMA ${schema} CASCADE`);
+  await controlPool.end();
 });
