@@ -28,7 +28,8 @@ function fixtureFetch({ signed = true } = {}) {
       fundsMove: false,
       assets: Array.from({ length: 10 }, (_, index) => ({ symbol: `ASSET${index}` })),
       rooms: ["NLH", "PLO4", "ROE", "ROE"].map((game) => ({
-        tableRules: { game, minimumBuyInAtomic: "2000" },
+        game,
+        rules: { minimumBuyInAtomic: "2000" },
       })),
     }, { "access-control-allow-origin": "https://front.example" });
     if (url.endsWith("/v1/release/status")) return response(200, {
@@ -37,7 +38,7 @@ function fixtureFetch({ signed = true } = {}) {
       attestations: {
         buildCommit: "a".repeat(40),
         assetAllowlistVersion: "allowlist-v1",
-        dealerSignerKeyId: "b".repeat(64),
+        dealerSignerKeyId: "b".repeat(32),
       },
       checks: [
         { name: "dealer_key_isolated", passed: true },

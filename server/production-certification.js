@@ -61,9 +61,9 @@ export async function certifyProduction({
   assert(lobby.body.assets?.length === 10, "Production lobby must expose exactly 10 allowlisted assets");
   assert(new Set(lobby.body.assets.map((asset) => asset.symbol)).size === 10, "Asset symbols must be unique");
   assert(lobby.body.rooms?.length === 4, "Production lobby must expose exactly four public rooms");
-  const games = lobby.body.rooms.map((room) => room.tableRules?.game).sort();
+  const games = lobby.body.rooms.map((room) => room.game).sort();
   assert(JSON.stringify(games) === JSON.stringify(["NLH", "PLO4", "ROE", "ROE"]), "Public room game mix changed");
-  assert(lobby.body.rooms.every((room) => room.tableRules?.minimumBuyInAtomic === "2000"), "Public room minimum buy-in changed");
+  assert(lobby.body.rooms.every((room) => room.rules?.minimumBuyInAtomic === "2000"), "Public room minimum buy-in changed");
 
   const forbidden = await request(fetchImpl, `${apiUrl}/v1/beta/lobby`, {
     headers: { origin: "https://certification-origin.invalid" },
@@ -81,7 +81,7 @@ export async function certifyProduction({
     assert(release.body.attestations.buildCommit === expectedBuildCommit, "Production is not running the expected build commit");
   }
   assert(/^[a-z0-9][a-z0-9._-]{7,127}$/i.test(release.body.attestations?.assetAllowlistVersion ?? ""), "Asset allowlist is not versioned");
-  assert(/^[0-9a-f]{64}$/i.test(release.body.attestations?.dealerSignerKeyId ?? ""), "Live dealer signer key is not attested");
+  assert(/^[0-9a-f]{32}$/i.test(release.body.attestations?.dealerSignerKeyId ?? ""), "Live dealer signer key is not attested");
   if (requireSignedManifest) {
     for (const name of [
       "release_manifest_version",

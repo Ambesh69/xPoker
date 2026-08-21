@@ -2,6 +2,7 @@ import { verifyReleaseManifestSignature } from "./release-manifest.js";
 import { decodeBase58, encodeBase58 } from "./wallet-auth.js";
 
 const HEX_32 = /^[0-9a-f]{64}$/i;
+const TRANSCRIPT_KEY_ID = /^[0-9a-f]{32}$/i;
 
 function isFuture(value, now) {
   const timestamp = Date.parse(value);
@@ -60,7 +61,7 @@ function dealerKeyMatches(config, manifest, runtimeAttestations) {
   if (manifest?.dealerKey?.provider !== config.dealerKeyProvider) return false;
   if (config.dealerKeyProvider === "remote-signer") {
     const actualKeyId = runtimeAttestations?.dealerSignerKeyId;
-    return HEX_32.test(actualKeyId ?? "") && manifest.dealerKey.keyId === actualKeyId;
+    return TRANSCRIPT_KEY_ID.test(actualKeyId ?? "") && manifest.dealerKey.keyId === actualKeyId;
   }
   if (["aws-kms", "vault"].includes(config.dealerKeyProvider)) {
     return manifest.dealerKey.reference === config.dealerKeyReference;

@@ -32,7 +32,7 @@ function generatedManifest(env) {
   const buildCommit = required(env.BUILD_COMMIT, "BUILD_COMMIT");
   if (!/^[0-9a-f]{40}$/i.test(buildCommit)) throw new Error("BUILD_COMMIT must be a full 40-character Git commit");
   const dealerSignerKeyId = required(env.DEALER_SIGNER_KEY_ID, "DEALER_SIGNER_KEY_ID");
-  if (!/^[0-9a-f]{64}$/i.test(dealerSignerKeyId)) throw new Error("DEALER_SIGNER_KEY_ID must be a SHA-256 key ID");
+  if (!/^[0-9a-f]{32}$/i.test(dealerSignerKeyId)) throw new Error("DEALER_SIGNER_KEY_ID must be a 128-bit transcript key ID");
   const unsigned = {
     version: RELEASE_MANIFEST_VERSION,
     generatedAt: new Date().toISOString(),

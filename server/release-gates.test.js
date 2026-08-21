@@ -133,7 +133,7 @@ test("a remote-signer manifest is bound to the key observed by the live runtime"
   fixture.config.dealerSignerToken = "t".repeat(32);
   delete fixture.config.dealerKeyReference;
   const { signature: _signature, ...unsigned } = fixture.manifest;
-  unsigned.dealerKey = { provider: "remote-signer", keyId: "ef".repeat(32) };
+  unsigned.dealerKey = { provider: "remote-signer", keyId: "ef".repeat(16) };
   fixture.manifest = {
     ...unsigned,
     signature: sign(null, Buffer.from(canonicalJson(unsigned)), fixture.authority.privateKey).toString("base64url"),
@@ -142,7 +142,7 @@ test("a remote-signer manifest is bound to the key observed by the live runtime"
   let result = evaluateReleaseGates({
     config: fixture.config,
     manifest: fixture.manifest,
-    runtimeAttestations: { dealerSignerKeyId: "ef".repeat(32) },
+    runtimeAttestations: { dealerSignerKeyId: "ef".repeat(16) },
     now: new Date("2026-08-17T00:00:00.000Z"),
   });
   assert.equal(result.checks.find((check) => check.name === "release_matches_dealer_key").passed, true);
@@ -150,7 +150,7 @@ test("a remote-signer manifest is bound to the key observed by the live runtime"
   result = evaluateReleaseGates({
     config: fixture.config,
     manifest: fixture.manifest,
-    runtimeAttestations: { dealerSignerKeyId: "01".repeat(32) },
+    runtimeAttestations: { dealerSignerKeyId: "01".repeat(16) },
     now: new Date("2026-08-17T00:00:00.000Z"),
   });
   assert.equal(result.checks.find((check) => check.name === "release_matches_dealer_key").passed, false);
