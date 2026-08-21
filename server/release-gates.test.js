@@ -40,6 +40,11 @@ function productionFixture() {
   const unsigned = {
       version: "xpoker-release/v1",
       buildCommit,
+      runtime: { assetAllowlistVersion: "allowlist-v1" },
+      dealerKey: {
+        provider: "aws-kms",
+        reference: "arn:aws:kms:us-east-1:111122223333:key/example",
+      },
       settlementProgram: {
         cluster: "mainnet-beta",
         programId: "14dia6Spfd6qu6Q36caisExYQsLA9si4PqFpqfiQ8Z9S",
@@ -60,7 +65,7 @@ function productionFixture() {
     ...unsigned,
     signature: sign(null, Buffer.from(canonicalJson(unsigned)), authority.privateKey).toString("base64url"),
   };
-  return { config, manifest };
+  return { config, manifest, authority };
 }
 
 test("real-value mode opens only when every gate passes", () => {
@@ -119,4 +124,34 @@ test("GitHub Actions uptime monitoring satisfies the external monitoring gate", 
   fixture.config.externalUptimeUrl = "https://github.com/Ambesh69/xPoker/actions/workflows/uptime.yml";
   const result = evaluateReleaseGates({ ...fixture, now: new Date("2026-08-17T00:00:00.000Z") });
   assert.equal(result.checks.find((check) => check.name === "monitoring_configured").passed, true);
+});
+
+test("a remote-signer manifest is bound to the key observed by the live runtime", () => {
+  const fixture = productionFixture();
+  fixture.config.dealerKeyProvider = "remote-signer";
+  fixture.config.dealerSignerUrl = "http://signer.railway.internal:8788";
+  fixture.config.dealerSignerToken = "t".repeat(32);
+  delete fixture.config.dealerKeyReference;
+  const { signature: _signature, ...unsigned } = fixture.manifest;
+  unsigned.dealerKey = { provider: "remote-signer", keyId: "ef".repeat(32) };
+  fixture.manifest = {
+    ...unsigned,
+    signature: sign(null, Buffer.from(canonicalJson(unsigned)), fixture.authority.privateKey).toString("base64url"),
+  };
+
+  let result = evaluateReleaseGates({
+    config: fixture.config,
+    manifest: fixture.manifest,
+    runtimeAttestations: { dealerSignerKeyId: "ef".repeat(32) },
+    now: new Date("2026-08-17T00:00:00.000Z"),
+  });
+  assert.equal(result.checks.find((check) => check.name === "release_matches_dealer_key").passed, true);
+
+  result = evaluateReleaseGates({
+    config: fixture.config,
+    manifest: fixture.manifest,
+    runtimeAttestations: { dealerSignerKeyId: "01".repeat(32) },
+    now: new Date("2026-08-17T00:00:00.000Z"),
+  });
+  assert.equal(result.checks.find((check) => check.name === "release_matches_dealer_key").passed, false);
 });

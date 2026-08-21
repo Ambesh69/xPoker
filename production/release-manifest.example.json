@@ -1,6 +1,18 @@
 {
   "version": "xpoker-release/v1",
+  "generatedAt": "",
   "buildCommit": "0000000000000000000000000000000000000000",
+  "releaseAuthorityKeyId": "",
+  "runtime": {
+    "assetAllowlistVersion": "",
+    "apiDeploymentId": "",
+    "signerDeploymentId": "",
+    "certificationEvidenceSha256": ""
+  },
+  "dealerKey": {
+    "provider": "remote-signer",
+    "keyId": ""
+  },
   "settlementProgram": {
     "cluster": "mainnet-beta",
     "programId": "",

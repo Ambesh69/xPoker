@@ -1,0 +1,102 @@
+name: Production release certification
+
+on:
+  workflow_dispatch:
+    inputs:
+      require_signed_manifest:
+        description: "Require the live API to already match a valid signed manifest"
+        required: true
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+
+concurrency:
+  group: production-release-certification
+  cancel-in-progress: false
+
+jobs:
+  certify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: xpoker_certification
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d xpoker_certification"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+      redis:
+        image: redis:7.4-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_URL_TEST: postgresql://postgres:postgres@127.0.0.1:5432/xpoker_certification
+      REDIS_URL_TEST: redis://127.0.0.1:6379
+      RUN_SOAK_CERTIFICATION: "1"
+      SOAK_DURATION_MS: "30000"
+      SOAK_TABLE_COUNT: "16"
+      SOAK_P95_LIMIT_MS: "2000"
+      BUILD_COMMIT: ${{ github.sha }}
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: mkdir -p artifacts
+
+      - name: Certify the live zero-value production contract
+        env:
+          CERTIFICATION_OUTPUT: artifacts/production-certification.json
+          EXPECTED_BUILD_COMMIT: ${{ github.sha }}
+          REQUIRE_SIGNED_MANIFEST: ${{ inputs.require_signed_manifest && '1' || '0' }}
+        run: npm run certify:production
+
+      - name: Run wallet, invitations, NLH, PLO, ROE, reconnect, timeout, report, proof, load, and chaos checks
+        run: npm run test:certification 2>&1 | tee artifacts/test-certification.tap
+
+      - name: Audit production dependencies
+        run: npm audit --omit=dev --audit-level=high --json > artifacts/npm-audit.json
+
+      - name: Index immutable evidence
+        run: node server/certification-evidence.js artifacts/evidence-index.json artifacts/production-certification.json artifacts/test-certification.tap artifacts/npm-audit.json
+
+      - name: Build and self-verify the signed release manifest
+        env:
+          RELEASE_AUTHORITY_PRIVATE_KEY_PEM: ${{ secrets.RELEASE_AUTHORITY_PRIVATE_KEY_PEM }}
+        run: |
+          set -euo pipefail
+          test -n "$RELEASE_AUTHORITY_PRIVATE_KEY_PEM"
+          export ASSET_ALLOWLIST_VERSION="$(node -e 'const r=require("./artifacts/production-certification.json");process.stdout.write(r.runtime.assetAllowlistVersion)')"
+          export DEALER_SIGNER_KEY_ID="$(node -e 'const r=require("./artifacts/production-certification.json");process.stdout.write(r.runtime.dealerSignerKeyId)')"
+          export DEALER_KEY_PROVIDER=remote-signer
+          export SETTLEMENT_CLUSTER="$(node -e 'const r=require("./artifacts/production-certification.json");process.stdout.write(r.runtime.settlementProgram?.cluster||"")')"
+          export SETTLEMENT_PROGRAM_ID="$(node -e 'const r=require("./artifacts/production-certification.json");process.stdout.write(r.runtime.settlementProgram?.programId||"")')"
+          export SETTLEMENT_PROGRAM_BINARY_SHA256="$(node -e 'const r=require("./artifacts/production-certification.json");process.stdout.write(r.runtime.settlementProgram?.binarySha256||"")')"
+          export SETTLEMENT_UPGRADE_AUTHORITY="$(node -e 'const r=require("./artifacts/production-certification.json");process.stdout.write(r.runtime.settlementProgram?.upgradeAuthority||"")')"
+          export CERTIFICATION_EVIDENCE_SHA256="$(sha256sum artifacts/evidence-index.json | cut -d' ' -f1)"
+          node server/release-manifest-cli.js generate artifacts/release-manifest.json
+
+      - name: Upload certification evidence and signed manifest
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: production-release-${{ github.sha }}
+          path: artifacts/
+          if-no-files-found: error
+          retention-days: 90

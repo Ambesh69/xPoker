@@ -1,9 +1,9 @@
-import { readFile } from "node:fs/promises";
 import { createServer } from "node:http";
 import { createHash, randomUUID, timingSafeEqual } from "node:crypto";
 
 import { loadConfig } from "./config.js";
 import { evaluateReleaseGates } from "./release-gates.js";
+import { loadReleaseManifest } from "./release-manifest.js";
 import { createAuthoritativeRuntime } from "./runtime.js";
 import { issueWalletChallenge, verifyWalletChallenge } from "./wallet-auth.js";
 
@@ -16,11 +16,6 @@ const SECURITY_HEADERS = Object.freeze({
   "x-content-type-options": "nosniff",
   "x-frame-options": "DENY",
 });
-
-async function readManifest(path) {
-  if (!path) return undefined;
-  return JSON.parse(await readFile(path, "utf8"));
-}
 
 function sendJson(response, statusCode, body, requestId, extraHeaders = {}) {
   response.writeHead(statusCode, {
@@ -561,6 +556,7 @@ export function createRequestHandler({ config, gates, auth, safeBeta, operations
         realValueRequested: gates.realValueRequested,
         realValueEnabled: gates.realValueEnabled,
         checks: gates.checks,
+        attestations: gates.attestations,
         requestId,
       }, requestId);
       return;
@@ -569,9 +565,12 @@ export function createRequestHandler({ config, gates, auth, safeBeta, operations
   };
 }
 
-export async function createApiServer({ config = loadConfig(), manifest, auth, safeBeta, operations, monitoring, healthCheck } = {}) {
-  const releaseManifest = manifest ?? await readManifest(config.releaseManifestPath);
-  const gates = evaluateReleaseGates({ config, manifest: releaseManifest });
+export async function createApiServer({ config = loadConfig(), manifest, runtimeAttestations, auth, safeBeta, operations, monitoring, healthCheck } = {}) {
+  const releaseManifest = manifest ?? await loadReleaseManifest({
+    path: config.releaseManifestPath,
+    json: config.releaseManifestJson,
+  });
+  const gates = evaluateReleaseGates({ config, manifest: releaseManifest, runtimeAttestations });
   const server = createServer(createRequestHandler({ config, gates, auth, safeBeta, operations, monitoring, healthCheck }));
   server.releaseGates = gates;
   return server;
@@ -589,6 +588,9 @@ export async function startApiServer({ config = loadConfig(), runtimeFactory = c
     operations: runtime?.operations,
     monitoring: runtime?.monitoring,
     healthCheck: runtime?.health,
+    runtimeAttestations: {
+      dealerSignerKeyId: runtime?.safeBetaDealer?.signerKeyId,
+    },
   });
   try {
     if (runtime) await runtime.attach(server);

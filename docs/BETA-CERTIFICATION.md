@@ -70,6 +70,8 @@ npm run test:soak
 
 The normal `npm test` run executes the E2E and bounded chaos files on every push in the Node 20/22 PostgreSQL 16 and Redis 7.4 matrix. Test files run serially because the stateful integration scenarios intentionally share those PostgreSQL and Redis services while exercising leases and fault injection; concurrency and load are generated inside the dedicated load and soak tests. `.github/workflows/beta-certification.yml` repeats the complete focused certification, including the 30-second soak, weekly and on manual dispatch.
 
+`.github/workflows/release-certification.yml` adds a production-safe layer: it checks the deployed frontend, authoritative readiness, operational probes, security headers, exact trusted-origin CORS, rejection of an untrusted origin, the ten-asset/four-room contract, disabled fund movement, dealer-key isolation, and the actual live signer key attestation. It then runs this disposable certification suite, hashes every report into an evidence index, and produces a signed manifest for the exact deployed commit. It does not create production players, consume invitations, play production hands, or write to the production database.
+
 ## Interpretation
 
 A green run is a closed-beta software baseline, not permission to enable money play. The automated profile covers bounded service interruption, latency, replica replacement, and sustained table traffic; it does not replace peak target-volume capacity planning, multi-region evacuation, DDoS exercises, independent penetration testing, cryptography/RNG certification, contract audits, or regulatory approval. Those remain release gates.

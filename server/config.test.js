@@ -55,3 +55,18 @@ test("monitoring configuration requires HTTPS endpoints and long bearer secrets"
     /REDIS_TRANSPORT_SECURITY/,
   );
 });
+
+test("release manifest JSON can be supplied as a sealed environment value", () => {
+  const config = loadConfig({
+    RELEASE_MANIFEST_JSON: '{"version":"xpoker-release/v1"}',
+  });
+  assert.equal(config.releaseManifestJson, '{"version":"xpoker-release/v1"}');
+});
+
+test("Railway's immutable deployment commit takes precedence over a stale configured commit", () => {
+  const config = loadConfig({
+    BUILD_COMMIT: "a".repeat(40),
+    RAILWAY_GIT_COMMIT_SHA: "b".repeat(40),
+  });
+  assert.equal(config.buildCommit, "b".repeat(40));
+});

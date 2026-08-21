@@ -143,6 +143,10 @@ PostgreSQL must use `sslmode=require` or `sslmode=verify-full`. Railway's Postgr
 
 `DEALER_KEY_PROVIDER` is not an honor-system flag. AWS KMS or Vault also requires `DEALER_KEY_REFERENCE`, while `remote-signer` requires an authenticated `DEALER_SIGNER_URL` and `DEALER_SIGNER_TOKEN`. The gate remains closed if either `DEALER_SIGNING_KEY_PEM` or `SAFE_BETA_SIGNING_KEY_PEM` is present in the API process. The dedicated signer image is defined by `Dockerfile.signer` and `railway.signer.json`; migrate the existing sealed safe-beta key during a maintenance window without rotating it or exposing it in logs, chat, or repository history.
 
+The public release authority is separate from the dealer. A signed `xpoker-release/v1` manifest binds the full Git commit, the live signer key ID, the asset-allowlist version, settlement configuration, and the digest of the retained certification index. Supply the signed public document through exactly one of `RELEASE_MANIFEST_PATH` or sealed `RELEASE_MANIFEST_JSON`, and supply only the Ed25519 public key to the API as `RELEASE_AUTHORITY_PUBLIC_KEY_PEM`. The private release-authority key belongs in the GitHub Actions secret `RELEASE_AUTHORITY_PRIVATE_KEY_PEM`; it must never be deployed to the API or signer.
+
+`.github/workflows/release-certification.yml` runs the live, non-mutating production contract checks and the disposable PostgreSQL/Redis E2E, load, restart, latency, interruption, and drand-failure suite. It hashes the reports, signs a release manifest, and retains the evidence artifact for 90 days. The first run can generate the manifest with `require_signed_manifest=false`; after deploying that manifest, repeat with `require_signed_manifest=true` to prove the deployed commit, allowlist, settlement settings, and actual remote-signer key all match. Pending independent audit or regulatory entries stay pending and continue to block real-value mode.
+
 ## Local verification
 
 ```bash
@@ -152,6 +156,7 @@ npm test
 npm run test:certification
 npm run audit
 npm run test:beacon
+npm run certify:production
 ```
 
 `npm run test:beacon` performs a live signature-verified Quicknet fetch and is intentionally separate from deterministic CI tests. GitHub CI runs the unit tests plus real PostgreSQL 16 and Redis 7.4 adapter tests on Node 20 and Node 22. The focused closed-beta suite and its limits are documented in [`BETA-CERTIFICATION.md`](BETA-CERTIFICATION.md).

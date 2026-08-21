@@ -113,6 +113,7 @@ export class SafeBetaDealer {
     this.redis = redis;
     this.tableCoordinator = tableCoordinator;
     this.handCoordinator = handCoordinator;
+    this.signerKeyId = handCoordinator.signer.keyId;
     this.dealerStore = dealerStore;
     this.keyRegistry = keyRegistry;
     this.beaconReservation = beaconReservation;

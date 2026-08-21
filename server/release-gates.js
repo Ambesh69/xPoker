@@ -1,6 +1,4 @@
-import { createPublicKey, verify } from "node:crypto";
-
-import { canonicalJson } from "../fairness/protocol.js";
+import { verifyReleaseManifestSignature } from "./release-manifest.js";
 import { decodeBase58, encodeBase58 } from "./wallet-auth.js";
 
 const HEX_32 = /^[0-9a-f]{64}$/i;
@@ -16,22 +14,6 @@ function evidencePassed(item, now) {
     && item.provider.length >= 2
     && HEX_32.test(item.reportSha256 ?? "")
     && isFuture(item.expiresAt, now);
-}
-
-function manifestSignaturePassed(manifest, publicKeyPem) {
-  try {
-    const { signature, ...unsigned } = manifest;
-    const publicKey = createPublicKey(publicKeyPem);
-    if (publicKey.asymmetricKeyType !== "ed25519") return false;
-    return verify(
-      null,
-      Buffer.from(canonicalJson(unsigned), "utf8"),
-      publicKey,
-      Buffer.from(signature, "base64url"),
-    );
-  } catch {
-    return false;
-  }
 }
 
 function isSolanaPublicKey(value) {
@@ -74,7 +56,19 @@ function monitoringConfigured(config) {
     && url.hostname === "github.com";
 }
 
-export function evaluateReleaseGates({ config, manifest, now = new Date() }) {
+function dealerKeyMatches(config, manifest, runtimeAttestations) {
+  if (manifest?.dealerKey?.provider !== config.dealerKeyProvider) return false;
+  if (config.dealerKeyProvider === "remote-signer") {
+    const actualKeyId = runtimeAttestations?.dealerSignerKeyId;
+    return HEX_32.test(actualKeyId ?? "") && manifest.dealerKey.keyId === actualKeyId;
+  }
+  if (["aws-kms", "vault"].includes(config.dealerKeyProvider)) {
+    return manifest.dealerKey.reference === config.dealerKeyReference;
+  }
+  return false;
+}
+
+export function evaluateReleaseGates({ config, manifest, runtimeAttestations, now = new Date() }) {
   const checks = [
     ["postgres_tls", config.databaseUrl?.startsWith("postgres") && /sslmode=(require|verify-full)/.test(config.databaseUrl)],
     ["redis_transport_encrypted", redisTransportEncrypted(config)],
@@ -91,11 +85,13 @@ export function evaluateReleaseGates({ config, manifest, now = new Date() }) {
     ["asset_allowlist_versioned", /^[a-z0-9][a-z0-9._-]{7,127}$/i.test(config.assetAllowlistVersion ?? "")],
     ["release_manifest_version", manifest?.version === "xpoker-release/v1"],
     ["release_matches_build", manifest?.buildCommit === config.buildCommit && /^[0-9a-f]{40}$/i.test(config.buildCommit ?? "")],
+    ["release_matches_asset_allowlist", manifest?.runtime?.assetAllowlistVersion === config.assetAllowlistVersion],
+    ["release_matches_dealer_key", dealerKeyMatches(config, manifest, runtimeAttestations)],
     ["release_matches_settlement", manifest?.settlementProgram?.cluster === config.settlementCluster
       && manifest?.settlementProgram?.programId === config.settlementProgramId
       && manifest?.settlementProgram?.binarySha256 === config.settlementProgramBinarySha256
       && manifest?.settlementProgram?.upgradeAuthority === config.settlementUpgradeAuthority],
-    ["release_manifest_signature", manifestSignaturePassed(manifest, config.releaseAuthorityPublicKeyPem)],
+    ["release_manifest_signature", verifyReleaseManifestSignature(manifest, config.releaseAuthorityPublicKeyPem)],
     ["application_security_audit", evidencePassed(manifest?.evidence?.applicationSecurityAudit, now)],
     ["cryptography_audit", evidencePassed(manifest?.evidence?.cryptographyAudit, now)],
     ["settlement_contract_audit", evidencePassed(manifest?.evidence?.settlementContractAudit, now)],
@@ -111,6 +107,17 @@ export function evaluateReleaseGates({ config, manifest, now = new Date() }) {
     realValueEnabled: config.realValueMode && failed.length === 0,
     checks,
     failed,
+    attestations: Object.freeze({
+      buildCommit: config.buildCommit,
+      assetAllowlistVersion: config.assetAllowlistVersion,
+      dealerSignerKeyId: runtimeAttestations?.dealerSignerKeyId,
+      settlementProgram: Object.freeze({
+        cluster: config.settlementCluster,
+        programId: config.settlementProgramId,
+        binarySha256: config.settlementProgramBinarySha256,
+        upgradeAuthority: config.settlementUpgradeAuthority,
+      }),
+    }),
   });
 }
 

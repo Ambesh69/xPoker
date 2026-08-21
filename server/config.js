@@ -169,8 +169,9 @@ export function loadConfig(env = process.env) {
       label: "MONITOR_REALTIME_DISCONNECT_RATE_BPS",
     }) / 10_000,
     assetAllowlistVersion: env.ASSET_ALLOWLIST_VERSION,
-    buildCommit: env.BUILD_COMMIT,
+    buildCommit: env.RAILWAY_GIT_COMMIT_SHA ?? env.BUILD_COMMIT,
     releaseManifestPath: env.RELEASE_MANIFEST_PATH,
+    releaseManifestJson: env.RELEASE_MANIFEST_JSON,
     releaseAuthorityPublicKeyPem: env.RELEASE_AUTHORITY_PUBLIC_KEY_PEM,
     bodyLimitBytes: integer(env.BODY_LIMIT_BYTES, 16_384, {
       minimum: 1_024,
