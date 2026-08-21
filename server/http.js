@@ -402,7 +402,7 @@ async function handleAuth({ request, response, requestId, url, config, auth }) {
     sendJson(response, 405, { error: "method_not_allowed", requestId }, requestId, cors);
     return;
   }
-  if (!auth?.challengeStore || !auth?.sessionStore) {
+  if (!auth?.sessionStore) {
     sendJson(response, 503, { error: "authoritative_service_unavailable", requestId }, requestId, cors);
     return;
   }
@@ -410,7 +410,42 @@ async function handleAuth({ request, response, requestId, url, config, auth }) {
   const now = auth.clock?.() ?? new Date();
   const domain = new URL(config.publicOrigin).host;
   try {
+    if (url.pathname === "/v1/auth/privy") {
+      if (!auth.privy) {
+        sendJson(response, 503, { error: "privy_unavailable", requestId }, requestId, cors);
+        return;
+      }
+      const accessToken = bearerToken(request);
+      if (!accessToken) {
+        sendJson(response, 401, { error: "authentication_required", requestId }, requestId, cors);
+        return;
+      }
+      const body = await readJson(request, config.bodyLimitBytes);
+      const rate = await enforceAuthRateLimit({ auth, request, route: "privy", identity: "login" });
+      if (rate && !rate.allowed) {
+        sendJson(response, 429, { error: "rate_limited", requestId }, requestId, {
+          ...cors,
+          "retry-after": String(Math.max(1, Math.ceil(rate.retryAfterMs / 1_000))),
+        });
+        return;
+      }
+      const identity = await auth.privy.authenticate({ accessToken, wallet: body.wallet });
+      const session = await auth.sessionStore.issue({ wallet: identity.wallet });
+      sendJson(response, 200, {
+        token: session.token,
+        wallet: session.wallet,
+        issuedAt: session.issuedAt,
+        expiresAt: session.expiresAt,
+        identityProvider: "privy",
+        requestId,
+      }, requestId, cors);
+      return;
+    }
     if (url.pathname === "/v1/auth/challenge") {
+      if (!auth.challengeStore) {
+        sendJson(response, 503, { error: "authoritative_service_unavailable", requestId }, requestId, cors);
+        return;
+      }
       const body = await readJson(request, config.bodyLimitBytes);
       const rate = await enforceAuthRateLimit({ auth, request, route: "challenge", identity: body.wallet });
       if (rate && !rate.allowed) {
@@ -431,6 +466,10 @@ async function handleAuth({ request, response, requestId, url, config, auth }) {
       return;
     }
     if (url.pathname === "/v1/auth/verify") {
+      if (!auth.challengeStore) {
+        sendJson(response, 503, { error: "authoritative_service_unavailable", requestId }, requestId, cors);
+        return;
+      }
       const body = await readJson(request, config.bodyLimitBytes);
       const rate = await enforceAuthRateLimit({ auth, request, route: "verify", identity: body.wallet });
       if (rate && !rate.allowed) {
@@ -472,11 +511,11 @@ async function handleAuth({ request, response, requestId, url, config, auth }) {
   } catch (error) {
     const statusCode = Number.isInteger(error?.statusCode)
       ? error.statusCode
-      : url.pathname === "/v1/auth/verify" ? 401 : 400;
+      : ["/v1/auth/verify", "/v1/auth/privy"].includes(url.pathname) ? 401 : 400;
     sendJson(response, statusCode, {
       error: statusCode === 401 ? "authentication_failed" : "invalid_request",
       message: statusCode === 401
-        ? "Wallet authentication failed"
+        ? url.pathname === "/v1/auth/privy" ? "Privy authentication failed" : "Wallet authentication failed"
         : error instanceof Error ? error.message : "Authentication request failed",
       requestId,
     }, requestId, cors);

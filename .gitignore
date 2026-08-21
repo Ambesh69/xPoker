@@ -7,4 +7,5 @@ settlement/test-ledger/
 .env.*
 !.env.example
 coverage/
+dist/
 *.log

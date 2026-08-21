@@ -5,16 +5,17 @@ A safe multiplayer beta candidate for public and private poker rooms with xStock
 ## Run it
 
 ```bash
-python3 -m http.server 4173
+npm ci
+npm run dev:web
 ```
 
 Then open `http://localhost:4173`.
 
-No frontend build step is required. Without the authoritative API, the site remains an explicitly labeled interface preview.
+The production frontend is bundled with `npm run build:web` so the official Privy React SDK and its Solana connectors are pinned and self-hosted. Without the authoritative API, the site remains an explicitly labeled interface preview.
 
 ## Safe multiplayer beta
 
-The current client and server now provide Wallet Standard discovery with real Solana wallet challenge signing, expiring guest sessions, an optional read-only Core 10 holdings receipt, four permanent public rooms, hashed-invite private rooms, closed-beta access codes, player profiles, portable proof downloads, player reporting/moderation, an operator dashboard, idempotent table seating, replay-safe WebSocket reconnects, encrypted private cards, automatic NLH/PLO 4/ROE hands using a future verified drand round, and post-hand audit retrieval. Demo credits are isolated from the real-value ledger and have no deposit, withdrawal, escrow, settlement, or cash-out path.
+The current client and server now provide Privy-managed Solana wallet login with server-side access-token verification, a direct Wallet Standard challenge fallback, expiring guest sessions, an optional read-only Core 10 holdings receipt, four permanent public rooms, hashed-invite private rooms, closed-beta access codes, player profiles, portable proof downloads, player reporting/moderation, an operator dashboard, idempotent table seating, replay-safe WebSocket reconnects, encrypted private cards, automatic NLH/PLO 4/ROE hands using a future verified drand round, and post-hand audit retrieval. Demo credits are isolated from the real-value ledger and have no deposit, withdrawal, escrow, settlement, or cash-out path.
 
 Run the complete service with PostgreSQL and Redis after copying `.env.example`:
 

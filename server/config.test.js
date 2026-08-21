@@ -69,6 +69,23 @@ test("release manifest JSON can be supplied as a sealed environment value", () =
   assert.equal(config.releaseManifestJson, '{"version":"xpoker-release/v1"}');
 });
 
+test("Privy credentials are optional as a pair and the secret remains server-only", () => {
+  const config = loadConfig({
+    PRIVY_APP_ID: "privy-app-test-12345",
+    PRIVY_APP_SECRET: "p".repeat(40),
+  });
+  assert.equal(config.privyAppId, "privy-app-test-12345");
+  assert.equal(config.privyAppSecret, "p".repeat(40));
+  assert.throws(
+    () => loadConfig({ PRIVY_APP_ID: "privy-app-test-12345" }),
+    /configured together/,
+  );
+  assert.throws(
+    () => loadConfig({ PRIVY_APP_SECRET: "p".repeat(40) }),
+    /configured together/,
+  );
+});
+
 test("Railway's immutable deployment commit takes precedence over a stale configured commit", () => {
   const config = loadConfig({
     BUILD_COMMIT: "a".repeat(40),

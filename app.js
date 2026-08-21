@@ -34,6 +34,18 @@ const SESSION_KEY = "xpoker-safe-beta-session";
 const SESSION_META_KEY = "xpoker-safe-beta-session-meta";
 const LAST_WALLET_KEY = "xpoker-last-wallet";
 const walletRegistry = createWalletRegistry(window);
+let privyLoad;
+
+function ensurePrivy() {
+  if (!privyLoad) {
+    privyLoad = import("./privy-bridge.jsx").catch((error) => {
+      state.privyReady = false;
+      privyLoad = null;
+      throw error;
+    });
+  }
+  return privyLoad;
+}
 
 function storedJson(storage, key) { try { return JSON.parse(storage.getItem(key) || "null"); } catch { return null; } }
 const state = {
@@ -45,7 +57,7 @@ const state = {
   leaveRequestId: null,
   handHistory: [], operations: null, operationsPlayers: [], operationsReports: [], operationsInvites: [],
   wallets: [], pendingAccessInvite: "", sessionMeta: storedJson(sessionStorage, SESSION_META_KEY), sessionRecovery: null,
-  walletEntryMode: "wallet",
+  walletEntryMode: "wallet", privyReady: Boolean(window.xPokerPrivy?.ready), privyBusy: false,
   holdings: { status: "idle", data: null, error: null }, networkOnline: navigator.onLine,
   reconnectNextAt: null, reconnectReason: null, lastConnectedAt: null, proofDownload: null,
 };
@@ -59,10 +71,10 @@ function assetLogo(asset) { const item = assetDetails(asset); return `<span clas
 function roomLimits(room) { return { min: Number(room.rules.minimumBuyInAtomic) / 100, max: Number(room.rules.maximumBuyInAtomic) / 100, small: Number(room.rules.smallBlindAtomic) / 100, big: Number(room.rules.bigBlindAtomic) / 100 }; }
 function gameLabel(game) { return game === "PLO4" ? "PLO 4" : game === "ROE" ? "NLH ↔ PLO 4" : game; }
 
-function apiHeaders(authenticated = false) { const headers = { "content-type": "application/json" }; if (authenticated && state.token) headers.authorization = `Bearer ${state.token}`; return headers; }
-async function api(path, { method = "GET", body, authenticated = false } = {}) {
+function apiHeaders(authenticated = false, supplied = {}) { const headers = { "content-type": "application/json", ...supplied }; if (authenticated && state.token) headers.authorization = `Bearer ${state.token}`; return headers; }
+async function api(path, { method = "GET", body, authenticated = false, headers = {} } = {}) {
   if (!API_ORIGIN) throw new Error("The authoritative beta server is not configured on this deployment.");
-  const response = await fetch(`${API_ORIGIN}${path}`, { method, headers: apiHeaders(authenticated), body: body === undefined ? undefined : JSON.stringify(body) });
+  const response = await fetch(`${API_ORIGIN}${path}`, { method, headers: apiHeaders(authenticated, headers), body: body === undefined ? undefined : JSON.stringify(body) });
   const payload = await response.json().catch(() => ({}));
   if (!response.ok) {
     const error = new Error(payload.message || payload.error || `Request failed (${response.status})`);
@@ -192,7 +204,8 @@ function walletProviderList(serverReady) {
 function walletInviteField() { return `<details class="wallet-invite" ${state.pendingAccessInvite ? "open" : ""}><summary><span>Have a beta code?</span><small>Optional</small></summary><label class="field"><span class="sr-only">Closed-beta code</span><input class="input invite-code-input" id="access-invite-code" maxlength="20" value="${escapeHtml(state.pendingAccessInvite)}" placeholder="BETA-XXXXX-XXXXX" autocomplete="off" /></label></details>`; }
 function walletEntryBody(serverReady, recovery) {
   if (state.walletEntryMode === "guest") return `<div data-wallet-modal data-wallet-entry class="wallet-entry guest-entry">${recovery}<button class="wallet-back" data-action="show-wallet-login">← Use a wallet instead</button><div class="guest-entry-title"><span>G</span><div><strong>Enter with a guest profile</strong><small>Temporary identity · demo credits only</small></div></div><label class="field"><span class="field-label">Display name</span><input class="input" id="guest-name" maxlength="24" value="Market Player" autocomplete="nickname" /></label>${walletInviteField()}<button class="btn btn-accent guest-submit" data-action="guest-session" ${serverReady ? "" : "disabled"}>Enter beta as guest</button>${serverReady ? "" : `<div class="preview-fallback"><p class="legal-note warning-note">The multiplayer server is unavailable.</p><button class="btn" data-action="preview-session">Open interface preview</button></div>`}</div>`;
-  return `<div data-wallet-modal data-wallet-entry class="wallet-entry">${recovery}<section class="wallet-trust-card"><span class="trust-card-mark"><i></i></span><span><strong>One signature. Zero transactions.</strong><small>We verify this wallet. We cannot move its assets.</small></span><b>0 TX</b></section><div class="wallet-list-head"><span>Choose a Solana wallet</span><small>${state.wallets.length ? `${state.wallets.length} detected` : "Wallet Standard"}</small></div>${walletProviderList(serverReady)}<div class="wallet-mobile-actions"><a href="${phantomBrowseUrl()}">Open in Phantom</a><button data-action="copy-site-link">Copy link</button></div>${walletInviteField()}<button class="guest-choice" data-action="show-guest-login"><span><strong>Just looking around?</strong><small>Use a temporary guest profile</small></span><b>Continue as guest →</b></button>${serverReady ? "" : `<div class="preview-fallback"><p class="legal-note warning-note">The multiplayer server is unavailable.</p><button class="btn" data-action="preview-session">Open interface preview</button></div>`}</div>`;
+  const privyReady = serverReady && state.privyReady;
+  return `<div data-wallet-modal data-wallet-entry class="wallet-entry">${recovery}<section class="wallet-trust-card"><span class="trust-card-mark"><i></i></span><span><strong>One signature. Zero transactions.</strong><small>Identity is verified; asset movement stays impossible.</small></span><b>0 TX</b></section><button class="privy-entry-button" data-action="connect-privy" ${privyReady && !state.privyBusy ? "" : "disabled"}><span class="privy-mark" aria-hidden="true"><i>P</i><b>xP</b></span><span class="privy-entry-copy"><strong>${state.privyBusy ? "Finishing secure sign-in…" : "Continue with Privy"}</strong><small>Phantom, Solflare, Backpack or WalletConnect</small></span><span class="privy-entry-arrow">${state.privyBusy ? "···" : "→"}</span></button><div class="privy-boundary"><span><i></i> Session protection by Privy</span><span>Solana only</span></div><details class="direct-wallets"><summary><span>Connect directly</span><small>Wallet Standard fallback</small></summary><div class="wallet-list-head"><span>Detected on this device</span><small>${state.wallets.length ? `${state.wallets.length} wallets` : "None"}</small></div>${walletProviderList(serverReady)}<div class="wallet-mobile-actions"><a href="${phantomBrowseUrl()}">Open in Phantom</a><button data-action="copy-site-link">Copy link</button></div></details>${walletInviteField()}<button class="guest-choice" data-action="show-guest-login"><span><strong>Just looking around?</strong><small>Use a temporary guest profile</small></span><b>Continue as guest →</b></button>${serverReady ? state.privyReady ? "" : `<p class="privy-loading-note">Loading secure wallet access…</p>` : `<div class="preview-fallback"><p class="legal-note warning-note">The multiplayer server is unavailable.</p><button class="btn" data-action="preview-session">Open interface preview</button></div>`}</div>`;
 }
 function walletModal(after = state.pendingAfterConnect) {
   state.pendingAfterConnect = after;
@@ -201,8 +214,11 @@ function walletModal(after = state.pendingAfterConnect) {
   const serverReady = state.backend === "online";
   const recovery = state.sessionRecovery === "expired" ? `<div class="recovery-note"><span>↻</span><div><strong>Session expired</strong><small>Reconnect to continue. Your table and wallet were not changed.</small></div></div>` : "";
   const canDo = state.profile?.isGuest ? "Join demo rooms, send poker actions, and resume a table." : "Join demo rooms, send poker actions, resume a table, and read the approved ten public token balances.";
-  openModal(modalShell({ kind: "wallet-modal", eyebrow: state.profile ? "Session details" : "xPoker access", title: state.profile ? "Your beta session" : state.walletEntryMode === "guest" ? "Play without a wallet" : "Join the table", description: state.profile ? "Your temporary identity and its read-only permissions." : state.walletEntryMode === "guest" ? "Create an expiring profile for the zero-value beta." : "Connect once, then get straight to the game.", body: state.profile ? `<div data-wallet-modal>${walletSafetyReceipt()}<div class="safety-box"><strong>This session can</strong><span>${canDo}</span><strong>This session cannot</strong><span>Spend tokens, approve a program, deposit, withdraw, or cash out.</span></div></div>` : walletEntryBody(serverReady, recovery), footer: state.profile ? `<span class="balance-note">Bearer session stored in this tab only</span><button class="btn" data-action="logout">End session</button>` : `<span class="wallet-foot-signal"><i></i> Wallet Standard</span><span class="wallet-foot-boundary">DEMO · NO FUNDS</span>` }));
+  openModal(modalShell({ kind: "wallet-modal", eyebrow: state.profile ? "Session details" : "xPoker access", title: state.profile ? "Your beta session" : state.walletEntryMode === "guest" ? "Play without a wallet" : "Join the table", description: state.profile ? "Your temporary identity and its read-only permissions." : state.walletEntryMode === "guest" ? "Create an expiring profile for the zero-value beta." : "Connect once, then get straight to the game.", body: state.profile ? `<div data-wallet-modal>${walletSafetyReceipt()}<div class="safety-box"><strong>This session can</strong><span>${canDo}</span><strong>This session cannot</strong><span>Spend tokens, approve a program, deposit, withdraw, or cash out.</span></div></div>` : walletEntryBody(serverReady, recovery), footer: state.profile ? `<span class="balance-note">Bearer session stored in this tab only</span><button class="btn" data-action="logout">End session</button>` : `<span class="wallet-foot-signal"><i></i> Privy + Wallet Standard</span><span class="wallet-foot-boundary">DEMO · NO FUNDS</span>` }));
   if (state.profile && !state.profile.isGuest && state.holdings.status === "idle") loadHoldings();
+  if (!state.profile && state.walletEntryMode === "wallet") void ensurePrivy().catch(() => {
+    if (document.querySelector("[data-wallet-entry]")) toast("Secure wallet access could not load. Direct wallet login is still available.");
+  });
 }
 
 function bytesToBase64Url(bytes) { let binary = ""; for (const byte of bytes) binary += String.fromCharCode(byte); return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/g, ""); }
@@ -232,6 +248,39 @@ async function connectProvider(button) {
     if (inviteError) { toast(`${providerName} verified, but the invitation was not accepted: ${inviteError.message}`); state.view = "profile"; render(); }
     else { toast(`${providerName} ownership verified. No transaction was requested.`); resumePendingAction(); }
   } catch (error) { button.disabled = false; button.querySelector("small").textContent = "Try again"; toast(error.message || "Wallet sign-in failed."); }
+}
+
+async function connectPrivy(button) {
+  state.pendingAccessInvite = document.querySelector("#access-invite-code")?.value.trim().toUpperCase() || "";
+  if (!window.xPokerPrivy?.ready) { toast("Privy is still loading. Try again in a moment."); return; }
+  state.privyBusy = true;
+  button.disabled = true;
+  button.querySelector(".privy-entry-copy strong").textContent = "Opening secure sign-in…";
+  try {
+    const identity = await window.xPokerPrivy.login();
+    const verified = await api("/v1/auth/privy", {
+      method: "POST",
+      headers: { authorization: `Bearer ${identity.accessToken}` },
+      body: { wallet: identity.wallet },
+    });
+    storeSession(verified, `Privy · ${identity.walletName}`, verified.wallet);
+    let inviteError;
+    if (state.pendingAccessInvite) {
+      try { await api("/v1/beta/invitations/redeem", { method: "POST", authenticated: true, body: { code: state.pendingAccessInvite } }); }
+      catch (error) { inviteError = error; }
+    }
+    state.pendingAccessInvite = "";
+    closeModal();
+    await loadLobby({ quiet: true });
+    loadHoldings();
+    if (inviteError) { toast(`Privy verified the wallet, but the invitation was not accepted: ${inviteError.message}`); state.view = "profile"; render(); }
+    else { toast("Wallet verified by Privy. No transaction was requested."); resumePendingAction(); }
+  } catch (error) {
+    toast(error.message || "Privy sign-in failed.");
+  } finally {
+    state.privyBusy = false;
+    if (document.querySelector("[data-wallet-entry]")) walletModal();
+  }
 }
 
 async function loadHoldings() {
@@ -483,7 +532,7 @@ function leaveTable() {
   const id = requestId("leave"); state.leaveRequestId = id;
   if (!sendRealtime({ type: "command", command: "leave", requestId: id, tableId: state.tableId, expectedVersion: state.tableState.version, idempotencyKey: requestId("idem") })) state.leaveRequestId = null;
 }
-async function logout() { try { if (state.token && state.backend === "online") await api("/v1/auth/logout", { method: "POST", authenticated: true, body: {} }); } catch {} clearLocalSession(); state.operations = null; state.view = "lobby"; state.socket?.close(1000, "logout"); closeModal(); await loadLobby({ quiet: true }); toast("Beta session ended."); }
+async function logout() { try { if (state.token && state.backend === "online") await api("/v1/auth/logout", { method: "POST", authenticated: true, body: {} }); } catch {} try { await window.xPokerPrivy?.logout?.(); } catch {} clearLocalSession(); state.operations = null; state.view = "lobby"; state.socket?.close(1000, "logout"); closeModal(); await loadLobby({ quiet: true }); toast("Beta session ended."); }
 async function viewAudit(handId) {
   if (state.backend !== "online") { toast("A completed authoritative hand is required for an audit."); return; }
   try {
@@ -513,7 +562,7 @@ function handleAction(event) {
   if (action === "go-lobby") { event.preventDefault(); state.socket?.close(1000, "left table view"); state.view = "lobby"; closeModal(); loadLobby({ quiet: true }); }
   if (action === "show-profile") showProfile(); if (action === "show-history" || action === "refresh-history") loadHandHistory(); if (action === "show-operations" || action === "refresh-operations") loadOperations();
   if (action === "leave-table") { event.preventDefault(); leaveTable(); }
-  if (action === "open-wallet") walletModal(); if (action === "connect-provider") connectProvider(target); if (action === "guest-session") createGuestSession(); if (action === "preview-session") createPreviewSession(); if (action === "logout") logout();
+  if (action === "open-wallet") walletModal(); if (action === "connect-privy") connectPrivy(target); if (action === "connect-provider") connectProvider(target); if (action === "guest-session") createGuestSession(); if (action === "preview-session") createPreviewSession(); if (action === "logout") logout();
   if (action === "show-guest-login") { state.walletEntryMode = "guest"; walletModal(); } if (action === "show-wallet-login") { state.walletEntryMode = "wallet"; walletModal(); }
   if (action === "refresh-holdings") loadHoldings(); if (action === "copy-site-link") { navigator.clipboard?.writeText(location.href); toast("xPoker link copied. Open it inside your mobile wallet browser."); }
   if (action === "retry-realtime") retryRealtime();
@@ -542,6 +591,10 @@ function refreshWallets() {
   if (document.querySelector("[data-wallet-modal]") && !state.profile) walletModal();
 }
 walletRegistry.onChange(refreshWallets);
+window.addEventListener("xpoker:privy-ready", (event) => {
+  state.privyReady = Boolean(event.detail?.ready);
+  if (document.querySelector("[data-wallet-entry]") && !state.profile) walletModal();
+});
 window.addEventListener("offline", () => {
   state.networkOnline = false;
   if (state.view === "table") {

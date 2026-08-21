@@ -39,6 +39,12 @@ function optionalSecret(value, label) {
   return value;
 }
 
+function optionalPrivyAppId(value) {
+  if (!value) return undefined;
+  if (!/^[a-zA-Z0-9_-]{10,128}$/.test(value)) throw new Error("PRIVY_APP_ID is invalid");
+  return value;
+}
+
 function optionalChoice(value, label, choices) {
   if (!value) return undefined;
   if (!choices.includes(value)) throw new Error(`${label} must be one of: ${choices.join(", ")}`);
@@ -65,6 +71,11 @@ export function loadConfig(env = process.env) {
     env.SAFE_BETA_MODE === "enabled"
     || (nodeEnv !== "production" && env.SAFE_BETA_MODE !== "disabled")
   );
+  const privyAppId = optionalPrivyAppId(env.PRIVY_APP_ID);
+  const privyAppSecret = optionalSecret(env.PRIVY_APP_SECRET, "PRIVY_APP_SECRET");
+  if (Boolean(privyAppId) !== Boolean(privyAppSecret)) {
+    throw new Error("PRIVY_APP_ID and PRIVY_APP_SECRET must be configured together");
+  }
   return Object.freeze({
     nodeEnv,
     host: env.HOST ?? "127.0.0.1",
@@ -74,6 +85,8 @@ export function loadConfig(env = process.env) {
     realValueMode,
     safeBetaMode,
     betaInviteRequired: env.BETA_INVITE_REQUIRED === "enabled",
+    privyAppId,
+    privyAppSecret,
     adminWallets: wallets(env.ADMIN_WALLETS),
     instanceId: env.RAILWAY_REPLICA_ID ?? env.RAILWAY_DEPLOYMENT_ID ?? env.HOSTNAME,
     databaseUrl: env.DATABASE_URL,

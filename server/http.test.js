@@ -177,6 +177,58 @@ test("wallet auth rejects untrusted browser origins before reading a request", a
   assert.equal(result.body.error, "origin_forbidden");
 });
 
+test("Privy login exchanges a verified linked Solana identity for an xPoker session", async () => {
+  const wallet = encodeBase58(Buffer.alloc(32, 6));
+  const issued = [];
+  const auth = {
+    privy: {
+      async authenticate({ accessToken, wallet: requestedWallet }) {
+        assert.equal(accessToken, "privy-access-token-with-at-least-thirty-two-bytes");
+        assert.equal(requestedWallet, wallet);
+        return { wallet };
+      },
+    },
+    sessionStore: {
+      async issue({ wallet: sessionWallet }) {
+        issued.push(sessionWallet);
+        return {
+          token: "xpoker-session-token-with-at-least-thirty-two-bytes",
+          wallet: sessionWallet,
+          issuedAt: "2026-08-22T00:00:00.000Z",
+          expiresAt: "2026-08-22T01:00:00.000Z",
+        };
+      },
+    },
+  };
+  const result = await request(config(false), "/v1/auth/privy", {
+    method: "POST",
+    body: { wallet },
+    headers: {
+      origin: "https://play.xpoker.example",
+      authorization: "Bearer privy-access-token-with-at-least-thirty-two-bytes",
+    },
+    auth,
+  });
+  assert.equal(result.response.status, 200);
+  assert.equal(result.body.wallet, wallet);
+  assert.equal(result.body.identityProvider, "privy");
+  assert.deepEqual(issued, [wallet]);
+});
+
+test("Privy login fails closed when the provider is not configured", async () => {
+  const result = await request(config(false), "/v1/auth/privy", {
+    method: "POST",
+    body: { wallet: encodeBase58(Buffer.alloc(32, 6)) },
+    headers: {
+      origin: "https://play.xpoker.example",
+      authorization: "Bearer privy-access-token-with-at-least-thirty-two-bytes",
+    },
+    auth: { sessionStore: {} },
+  });
+  assert.equal(result.response.status, 503);
+  assert.equal(result.body.error, "privy_unavailable");
+});
+
 test("wallet auth returns a bounded retry delay when Redis denies a request", async () => {
   const result = await request(config(false), "/v1/auth/challenge", {
     method: "POST",

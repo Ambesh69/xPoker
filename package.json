@@ -4,6 +4,8 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "dev:web": "vite --host 127.0.0.1 --port 4173",
+    "build:web": "vite build",
     "test": "node --test --test-concurrency=1",
     "test:certification": "node --test --test-concurrency=1 server/beta-acceptance.integration.test.js server/full-gameplay.integration.test.js server/chaos-certification.integration.test.js server/resilience-certification.integration.test.js server/soak-certification.integration.test.js server/safe-beta-dealer.test.js server/realtime.test.js server/table-coordinator.test.js",
     "test:soak": "node --test --test-concurrency=1 server/soak-certification.integration.test.js",
@@ -26,9 +28,20 @@
     "node": ">=20 <25"
   },
   "dependencies": {
+    "@privy-io/node": "^0.30.0",
     "drand-client": "1.4.2",
     "pg": "8.23.0",
     "redis": "6.2.1",
     "ws": "8.21.3"
+  },
+  "devDependencies": {
+    "@privy-io/react-auth": "^3.37.4",
+    "@solana-program/memo": "^0.10.0",
+    "@solana-program/system": "^0.10.0",
+    "@solana-program/token": "^0.9.0",
+    "@solana/kit": "^5.1.0",
+    "react": "^19.2.8",
+    "react-dom": "^19.2.8",
+    "vite": "^7.2.4"
   }
 }

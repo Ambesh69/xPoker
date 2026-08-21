@@ -15,6 +15,7 @@ import { SafeBetaService } from "./safe-beta-service.js";
 import { createSafeBetaDealer } from "./safe-beta-dealer.js";
 import { RuntimeMonitoring } from "./monitoring.js";
 import { ReadOnlyXStocksHoldings } from "./xstocks-holdings.js";
+import { createPrivyAuthenticator } from "./privy-auth.js";
 
 function logError(logger, event, error, context = {}) {
   logger.error(JSON.stringify({
@@ -137,6 +138,10 @@ export async function createAuthoritativeRuntime({
       challengeStore: new RedisChallengeStore(redis),
       rateLimiter: new RedisRateLimiter(redis),
       sessionStore: new RedisSessionStore(redis),
+      privy: config.privyAppId ? createPrivyAuthenticator({
+        appId: config.privyAppId,
+        appSecret: config.privyAppSecret,
+      }) : undefined,
     });
     const safeBetaDealer = config.safeBetaMode ? await createSafeBetaDealer({
       pool,
