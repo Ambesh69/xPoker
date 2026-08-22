@@ -72,6 +72,7 @@ const state = {
   selectedRoom: FALLBACK_ROOMS[0], selectedAsset: FALLBACK_ASSETS[0], buyInAmount: 20, hostGame: "NLH",
   tableId: null, tableState: null, tableConnection: "offline", socket: null, reconnectTimer: null,
   reconnectAttempt: 0, holeKey: null, holeCards: [], lastEvent: null, pendingAfterConnect: null, audit: null,
+  tableVisual: { handId: null, boardCount: 0, holeCount: 0, potAtomic: 0 },
   leaveRequestId: null,
   handHistory: [], operations: null, operationsPlayers: [], operationsReports: [], operationsInvites: [],
   wallets: [], pendingAccessInvite: "", sessionMeta: storedJson(sessionStorage, SESSION_META_KEY), sessionRecovery: null,
@@ -406,22 +407,104 @@ function buyStocksModal(asset = state.selectedAsset) { state.selectedAsset = ass
 async function takeSeat() {
   if (!state.profile) { closeModal(); walletModal("buyin"); return; }
   const button = document.querySelector('[data-action="take-seat"]'); button.disabled = true; button.textContent = "Seating…";
-  if (state.backend !== "online") { closeModal(); state.tableId = "interface-preview"; state.tableState = previewTableState(); state.view = "table"; state.tableConnection = "preview"; render(); toast("Interface seat created locally. There is no multiplayer server on this deployment."); return; }
-  try { const result = await api("/v1/beta/tables/join", { method: "POST", authenticated: true, body: { roomId: state.selectedRoom.id, assetSymbol: state.selectedAsset.symbol, buyInAtomic: String(Math.round(state.buyInAmount * 100)) } }); closeModal(); state.tableId = result.tableId; state.tableState = result.state; state.view = "table"; state.holeCards = []; render(); connectRealtime(); toast(`${money(state.buyInAmount)} in demo credits seated. No funds moved.`); }
+  if (state.backend !== "online") { closeModal(); state.tableId = "interface-preview"; state.tableVisual = { handId: null, boardCount: 0, holeCount: 0, potAtomic: 0 }; state.tableState = previewTableState(); state.view = "table"; state.tableConnection = "preview"; render(); toast("Interface seat created locally. There is no multiplayer server on this deployment."); return; }
+  try { const result = await api("/v1/beta/tables/join", { method: "POST", authenticated: true, body: { roomId: state.selectedRoom.id, assetSymbol: state.selectedAsset.symbol, buyInAtomic: String(Math.round(state.buyInAmount * 100)) } }); closeModal(); state.tableId = result.tableId; state.tableVisual = { handId: null, boardCount: 0, holeCount: 0, potAtomic: 0 }; state.tableState = result.state; state.view = "table"; state.holeCards = []; render(); connectRealtime(); toast(`${money(state.buyInAmount)} in demo credits seated. No funds moved.`); }
   catch (error) { button.disabled = false; button.textContent = "Take demo seat"; toast(error.message); }
 }
 
 function previewTableState() { return { version: 1, status: "WAITING", tableId: "interface-preview", rules: state.selectedRoom.rules, seats: [{ playerId: state.profile?.wallet || "PreviewPlayer", seat: 3, stackAtomic: String(state.buyInAmount * 100), status: "SEATED", timeBankMs: 60_000 }], handNumber: 0, buttonSeat: null, currentHand: null, lastResult: null }; }
-function seatName(player) { return player.playerId === state.profile?.wallet ? state.profile.displayName : shortWallet(player.playerId); }
-function cardHtml(code, extra = "") { const red = /[♥♦]/.test(code) ? "red" : ""; return `<span class="card ${red} ${extra}">${escapeHtml(code)}</span>`; }
-function tableSeat(seatNumber) {
-  const player = state.tableState?.seats.find((candidate) => candidate.seat === seatNumber - 1); const handPlayer = state.tableState?.currentHand?.betting?.players.find((candidate) => candidate.seat === seatNumber - 1); const active = state.tableState?.currentHand?.turn?.playerId === player?.playerId; const isSelf = player?.playerId === state.profile?.wallet;
-  if (!player) return `<div class="seat seat-${seatNumber} empty-seat"><span class="empty-seat-ring">＋</span><span class="player-name">Open seat</span></div>`;
-  const initials = isSelf ? "YOU" : shortWallet(player.playerId).slice(0, 2).toUpperCase(); const cards = isSelf && state.holeCards.length ? `<span class="hero-cards">${state.holeCards.map((reveal) => cardHtml(reveal.card.code)).join("")}</span>` : "";
-  return `<div class="seat seat-${seatNumber} ${active ? "active" : ""}">${cards}<span class="player-avatar" style="--avatar-color:${isSelf ? "#ddd5ff" : ["#ffd9a2", "#ccecff", "#ffc7c5", "#d7ff86", "#dfe5e0"][seatNumber % 5]}">${initials}${state.tableState.buttonSeat === player.seat ? '<span class="dealer-chip">D</span>' : ""}</span><span class="player-name">${escapeHtml(seatName(player))}</span><span class="player-stack">${moneyAtomic(handPlayer?.stack ?? player.stackAtomic)} · ${state.selectedAsset.symbol}</span>${handPlayer && handPlayer.streetContribution !== "0" ? `<span class="seat-bet">${moneyAtomic(handPlayer.streetContribution)}</span>` : ""}</div>`;
+function adoptTableState(nextState) {
+  const previousHandId = state.tableState?.currentHand?.handId || null;
+  const nextHandId = nextState?.currentHand?.handId || null;
+  if (previousHandId !== nextHandId) state.holeCards = [];
+  state.tableState = nextState;
 }
 
-function fairnessRail() { const hand = state.tableState?.currentHand; const event = state.lastEvent; const completed = state.tableState?.lastResult?.handId; return `<aside class="fairness-rail"><div class="fairness-title"><span class="utility-label">Live hand tape</span><span class="connection-dot ${state.tableConnection}"></span></div><div class="tape-item"><span>Transport</span><strong>${escapeHtml(state.tableConnection)}</strong></div><div class="tape-item"><span>Table seq.</span><strong>${state.tableState?.version ?? 0}</strong></div><div class="tape-item"><span>Deck root</span><strong>${hand?.deckRoot ? `${hand.deckRoot.slice(0, 8)}…${hand.deckRoot.slice(-6)}` : "Waiting"}</strong></div><div class="tape-item"><span>Last event</span><strong>${escapeHtml(event?.type || "Snapshot ready")}</strong></div><div class="tape-note">Community cards include Merkle proofs. A complete post-hand audit is required before a hand is accepted.${completed ? `<button class="audit-link" data-action="view-audit" data-hand="${escapeHtml(completed)}">Verify last hand →</button>` : ""}</div></aside>`; }
+function tableVisualTransition(hand, boardCount, holeCount, potAtomic) {
+  const handId = hand?.handId || null;
+  const previous = state.tableVisual;
+  const handChanged = Boolean(handId && handId !== previous.handId);
+  const boardStart = handChanged ? 0 : Math.min(previous.boardCount, boardCount);
+  const holeStart = handChanged ? 0 : Math.min(previous.holeCount, holeCount);
+  const potChanged = Boolean(handId && previous.handId === handId && previous.potAtomic !== potAtomic);
+  state.tableVisual = { handId, boardCount, holeCount, potAtomic };
+  return { handChanged, boardStart, holeStart, potChanged };
+}
+
+function seatName(player) { return player.playerId === state.profile?.wallet ? state.profile.displayName : shortWallet(player.playerId); }
+const CARD_NAMES = Object.freeze({ A: "Ace", K: "King", Q: "Queen", J: "Jack", T: "Ten", 9: "Nine", 8: "Eight", 7: "Seven", 6: "Six", 5: "Five", 4: "Four", 3: "Three", 2: "Two" });
+const SUIT_NAMES = Object.freeze({ "♣": "clubs", "♦": "diamonds", "♥": "hearts", "♠": "spades" });
+const TABLE_SEAT_LAYOUTS = Object.freeze({
+  2: [[50, 77], [50, 7]],
+  3: [[50, 77], [88, 26], [12, 26]],
+  4: [[50, 77], [90, 53], [50, 7], [10, 53]],
+  5: [[50, 77], [87, 68], [81, 16], [19, 16], [13, 68]],
+  6: [[50, 77], [86, 70], [88, 27], [50, 7], [12, 27], [14, 70]],
+  7: [[50, 77], [76, 78], [92, 55], [79, 15], [21, 15], [8, 55], [24, 78]],
+  8: [[50, 77], [77, 79], [92, 61], [83, 19], [50, 7], [17, 19], [8, 61], [23, 79]],
+  9: [[50, 77], [74, 81], [92, 68], [91, 31], [71, 11], [29, 11], [9, 31], [8, 68], [26, 81]],
+});
+
+function cardHtml(code, { extra = "", index = 0, animate = false, style = "" } = {}) {
+  const hidden = !code || code === "?";
+  const safeCode = hidden ? "?" : String(code);
+  const suit = hidden ? "" : safeCode.slice(-1);
+  const rank = hidden ? "" : safeCode.slice(0, -1);
+  const red = /[♥♦]/.test(suit) ? "red" : "";
+  const classes = ["card", red, hidden ? "face-down" : "face-up", animate ? "is-dealt" : "", extra].filter(Boolean).join(" ");
+  const label = hidden ? "Face-down card" : `${CARD_NAMES[rank] || rank} of ${SUIT_NAMES[suit] || suit}`;
+  if (hidden) return `<span class="${classes}" style="--deal-index:${index};${style}" role="img" aria-label="${label}"><span class="card-back-mark">xP</span></span>`;
+  return `<span class="${classes}" style="--deal-index:${index};${style}" role="img" aria-label="${escapeHtml(label)}"><span class="card-corner card-corner-top"><b>${escapeHtml(rank)}</b><i>${escapeHtml(suit)}</i></span><span class="card-suit">${escapeHtml(suit)}</span><span class="card-corner card-corner-bottom"><b>${escapeHtml(rank)}</b><i>${escapeHtml(suit)}</i></span></span>`;
+}
+
+function tableSeatLayout(table) {
+  const count = Math.max(2, Math.min(9, Number(table.rules?.seats) || 6));
+  const selfSeat = table.seats.find((player) => player.playerId === state.profile?.wallet)?.seat ?? table.seats[0]?.seat ?? 0;
+  return TABLE_SEAT_LAYOUTS[count].map(([x, y], displayIndex) => ({ actualSeat: (selfSeat + displayIndex) % count, displayIndex, x, y }));
+}
+
+function turnTimerStyle(turn, playerId) {
+  if (!turn || turn.playerId !== playerId) return "";
+  const startedAt = Date.parse(turn.startedAt);
+  const deadlineAt = Date.parse(turn.deadlineAt);
+  if (!Number.isFinite(startedAt) || !Number.isFinite(deadlineAt)) return "";
+  const duration = Math.max(1_000, deadlineAt - startedAt);
+  const elapsed = Math.max(0, Math.min(duration, Date.now() - startedAt));
+  return `--turn-duration:${duration}ms;--turn-delay:-${elapsed}ms;`;
+}
+
+function tableSeat({ actualSeat, displayIndex, x, y }, visual) {
+  const table = state.tableState;
+  const player = table?.seats.find((candidate) => candidate.seat === actualSeat);
+  const hand = table?.currentHand;
+  const handPlayer = hand?.betting?.players.find((candidate) => candidate.seat === actualSeat);
+  const active = hand?.turn?.playerId === player?.playerId;
+  const isSelf = player?.playerId === state.profile?.wallet;
+  const zone = y < 20 ? "top" : y > 75 ? "bottom" : x < 25 ? "left" : x > 75 ? "right" : "middle";
+  const seatStyle = `--seat-x:${x}%;--seat-y:${y}%;${turnTimerStyle(hand?.turn, player?.playerId)}`;
+  if (!player) return `<div class="seat empty-seat zone-${zone}" style="${seatStyle}"><span class="empty-seat-ring" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14" /></svg></span><span class="player-name">Open seat</span></div>`;
+
+  const initials = isSelf ? "YOU" : shortWallet(player.playerId).slice(0, 2).toUpperCase();
+  const expectedCards = hand?.game === "PLO4" ? 4 : 2;
+  const inHand = Boolean(handPlayer);
+  const shownCards = isSelf && state.holeCards.length ? state.holeCards.map((reveal) => reveal.card.code) : Array.from({ length: inHand ? expectedCards : 0 }, () => "?");
+  const cards = shownCards.length ? `<span class="hole-cards ${isSelf ? "hero-cards" : "opponent-cards"}">${shownCards.map((code, index) => {
+    const fan = (index - (shownCards.length - 1) / 2) * (isSelf ? 4.5 : 3);
+    const shouldAnimate = isSelf && code !== "?" ? index >= visual.holeStart : visual.handChanged;
+    return cardHtml(code, { extra: isSelf ? "private-card" : "opponent-card", index, animate: shouldAnimate, style: `--card-rotate:${fan}deg;` });
+  }).join("")}</span>` : "";
+  const avatarColor = isSelf ? "#d8ff73" : ["#f5bd66", "#7cc8b3", "#ef8d79", "#83a8ff", "#c39aef", "#e5d27c"][displayIndex % 6];
+  const flags = [handPlayer?.folded ? "folded" : "", handPlayer?.allIn ? "all-in" : "", player.status === "SITTING_OUT" ? "sitting-out" : ""].filter(Boolean).join(" ");
+  return `<div class="seat zone-${zone} ${isSelf ? "is-self" : ""} ${active ? "active" : ""} ${flags}" style="${seatStyle}">${cards}<span class="player-avatar" style="--avatar-color:${avatarColor}"><span class="avatar-initials">${initials}</span>${active ? '<svg class="turn-ring" viewBox="0 0 64 64" aria-hidden="true"><circle cx="32" cy="32" r="29" pathLength="100" /></svg>' : ""}${table.buttonSeat === player.seat ? '<span class="dealer-chip">D</span>' : ""}</span><span class="player-identity"><span class="player-name">${escapeHtml(seatName(player))}${isSelf ? '<small>YOU</small>' : ""}</span><span class="player-stack">${moneyAtomic(handPlayer?.stack ?? player.stackAtomic)} <b>${escapeHtml(state.selectedAsset.symbol)}</b></span></span>${handPlayer?.allIn ? '<span class="seat-state">ALL IN</span>' : ""}${handPlayer && handPlayer.streetContribution !== "0" ? `<span class="seat-bet"><i></i>${moneyAtomic(handPlayer.streetContribution)}</span>` : ""}</div>`;
+}
+
+function fairnessRail() {
+  const hand = state.tableState?.currentHand;
+  const event = state.lastEvent;
+  const completed = state.tableState?.lastResult?.handId;
+  const root = hand?.deckRoot ? `${hand.deckRoot.slice(0, 6)}…${hand.deckRoot.slice(-4)}` : "Awaiting deal";
+  return `<aside class="fairness-rail"><div class="fairness-title"><span><i class="connection-dot ${state.tableConnection}"></i><strong>Verified deal</strong></span><small>${escapeHtml(state.tableConnection)}</small></div><div class="fairness-facts"><span><small>Sequence</small><strong>${state.tableState?.version ?? 0}</strong></span><span><small>Deck root</small><strong>${escapeHtml(root)}</strong></span><span><small>Last event</small><strong>${escapeHtml((event?.type || "Snapshot ready").replaceAll("_", " "))}</strong></span></div>${completed ? `<button class="audit-link" data-action="view-audit" data-hand="${escapeHtml(completed)}"><span>Audit last hand</span><b>↗</b></button>` : '<div class="fairness-seal"><span>✓</span> Merkle proofs on every reveal</div>'}</aside>`;
+}
 function connectionRecoveryBanner() {
   if (["live", "preview"].includes(state.tableConnection)) return "";
   const offline = !state.networkOnline;
@@ -432,15 +515,27 @@ function connectionRecoveryBanner() {
 function actionDock() {
   const current = state.tableState?.currentHand; const legal = current?.legalActions;
   if (!["live", "preview"].includes(state.tableConnection)) return `<div class="action-dock waiting-dock connection-hold"><span><strong>Actions paused while reconnecting</strong><small>Your last confirmed table state stays visible. No action will be guessed or queued.</small></span><button class="btn" data-action="retry-realtime" ${state.networkOnline ? "" : "disabled"}>Retry</button></div>`;
-  if (!current) return `<div class="action-dock waiting-dock"><span><strong>Waiting for players</strong><small>At least two active seats are required before a hand can start.</small></span><button class="btn" data-action="copy-table">Copy table ID</button></div>`;
-  if (!legal) return `<div class="action-dock waiting-dock"><span><strong>${current.turn ? `Action on ${escapeHtml(shortWallet(current.turn.playerId))}` : "Dealer resolving the street"}</strong><small>Live events will update this table automatically.</small></span><span class="tag">Hand ${state.tableState.handNumber}</span></div>`;
+  if (!current) return `<div class="action-dock waiting-dock"><span class="dock-status-icon"><i></i></span><span><strong>Waiting for the lineup</strong><small>Two active seats start the next cryptographically committed hand.</small></span><button class="btn" data-action="copy-table">Copy table ID</button></div>`;
+  if (!legal) return `<div class="action-dock waiting-dock"><span class="dock-status-icon is-live"><i></i></span><span><strong>${current.turn ? `Action on ${escapeHtml(shortWallet(current.turn.playerId))}` : "Dealer resolving the street"}</strong><small>Live events update the table automatically.</small></span><span class="tag">Hand ${state.tableState.handNumber}</span></div>`;
   const primary = legal.canCheck ? ["check", "Check"] : ["call", `Call ${moneyAtomic(legal.callAmount)}`]; const increase = legal.canRaise || legal.canBet; const min = Number(legal.minimumTarget || 0); const max = Number(legal.maximumTarget || min);
-  return `<div class="action-dock"><button class="btn" data-action="table-action" data-poker="fold" ${legal.canFold ? "" : "disabled"}>Fold</button><button class="btn btn-primary" data-action="table-action" data-poker="${primary[0]}">${primary[1]}</button><div class="bet-control"><span>${legal.canBet ? "Bet to" : "Raise to"}</span><strong id="raise-value">${moneyAtomic(min)}</strong><input class="range" id="bet-range" type="range" min="${min}" max="${max}" value="${min}" step="1" ${increase ? "" : "disabled"} aria-label="Raise target" /><button class="range-submit" data-action="table-action" data-poker="${legal.canBet ? "bet" : "raise"}" ${increase ? "" : "disabled"}>Send</button></div></div>`;
+  return `<div class="action-dock action-ready"><button class="btn fold-action" data-action="table-action" data-poker="fold" ${legal.canFold ? "" : "disabled"}><small>Give up</small><strong>Fold</strong></button><button class="btn btn-primary primary-action" data-action="table-action" data-poker="${primary[0]}"><small>${legal.canCheck ? "No wager" : "Match wager"}</small><strong>${primary[1]}</strong></button><div class="bet-control"><span>${legal.canBet ? "Bet to" : "Raise to"}</span><strong id="raise-value">${moneyAtomic(min)}</strong><input class="range" id="bet-range" type="range" min="${min}" max="${max}" value="${min}" step="1" ${increase ? "" : "disabled"} aria-label="Raise target" /><button class="range-submit" data-action="table-action" data-poker="${legal.canBet ? "bet" : "raise"}" ${increase ? "" : "disabled"}>${legal.canBet ? "Bet" : "Raise"}</button></div></div>`;
 }
 
 function tableView() {
-  const room = state.selectedRoom; const table = state.tableState || previewTableState(); const hand = table.currentHand; const board = hand?.publicReveals?.map((reveal) => reveal.card.code) || []; const potAtomic = hand?.betting?.players?.reduce((sum, player) => sum + Number(player.contributed), 0) || 0; const tableMessage = table.status === "WAITING" ? table.seats.length < 2 ? `${table.seats.length}/${table.rules.seats} seated · waiting for a second player` : `${table.seats.length}/${table.rules.seats} seated · dealer preparing the next fair hand` : hand?.turn ? `Action is on ${shortWallet(hand.turn.playerId)}` : "Dealer is resolving the hand";
-  return `<main class="table-page"><header class="table-bar"><div class="table-title"><button class="icon-btn" data-action="leave-table" aria-label="Leave table">←</button><div><h1>${escapeHtml(room.name)}</h1><span>${gameLabel(hand?.game || room.game)} · ${moneyAtomic(room.rules.smallBlindAtomic)} / ${moneyAtomic(room.rules.bigBlindAtomic)}</span></div></div><div class="table-meta"><span class="tag">Hand #${table.handNumber}</span><span class="tag">Seq ${table.version}</span><span class="tag">${state.selectedAsset.symbol} demo</span><span class="status-pill"><i class="market-dot"></i>No funds</span></div></header><section class="poker-stage">${connectionRecoveryBanner()}<div class="table-toast">${escapeHtml(tableMessage)}</div>${fairnessRail()}<div class="table-wrap"><div class="poker-table"><div class="pot-center"><span class="utility-label">Demo pot</span><strong>${moneyAtomic(potAtomic)} · ${state.selectedAsset.symbol}</strong><div class="board-cards">${Array.from({ length: 5 }, (_, index) => board[index] ? cardHtml(board[index]) : cardHtml("?", "face-down")).join("")}</div></div></div>${Array.from({ length: Math.min(table.rules.seats, 6) }, (_, index) => tableSeat(index + 1)).join("")}</div>${actionDock()}</section></main>`;
+  const room = state.selectedRoom;
+  const table = state.tableState || previewTableState();
+  const hand = table.currentHand;
+  const board = hand?.publicReveals?.map((reveal) => reveal.card.code) || [];
+  const potAtomic = hand?.betting?.players?.reduce((sum, player) => sum + Number(player.contributed), 0) || 0;
+  const visual = tableVisualTransition(hand, board.length, state.holeCards.length, potAtomic);
+  const tableMessage = table.status === "WAITING" ? table.seats.length < 2 ? `${table.seats.length}/${table.rules.seats} seated · waiting for a second player` : `${table.seats.length}/${table.rules.seats} seated · dealer preparing the next fair hand` : hand?.turn ? `Action is on ${shortWallet(hand.turn.playerId)}` : "Dealer is resolving the hand";
+  const phase = hand?.betting?.phase || (table.status === "WAITING" ? "TABLE OPEN" : "DEALING");
+  const game = gameLabel(hand?.game || room.game);
+  const seats = tableSeatLayout(table).map((seat) => tableSeat(seat, visual)).join("");
+  const boardCards = Array.from({ length: 5 }, (_, index) => board[index]
+    ? cardHtml(board[index], { extra: "community-card is-revealed", index, animate: index >= visual.boardStart })
+    : cardHtml("?", { extra: "community-card card-slot", index })).join("");
+  return `<main class="table-page"><header class="table-bar"><div class="table-title"><button class="icon-btn table-exit" data-action="leave-table" aria-label="Leave table"><svg viewBox="0 0 24 24"><path d="m15 18-6-6 6-6" /></svg></button><div><span class="table-kicker">${escapeHtml(game)} · ${moneyAtomic(room.rules.smallBlindAtomic)} / ${moneyAtomic(room.rules.bigBlindAtomic)}</span><h1>${escapeHtml(room.name)}</h1></div></div><div class="table-meta"><span class="tag"><small>Hand</small>#${table.handNumber}</span><span class="tag"><small>Sequence</small>${table.version}</span><span class="tag asset-table-tag"><small>Table asset</small>${escapeHtml(state.selectedAsset.symbol)}</span><span class="status-pill"><i class="market-dot"></i>Demo · no funds</span></div></header><section class="poker-stage">${connectionRecoveryBanner()}<div class="table-toast"><span></span>${escapeHtml(tableMessage)}</div>${fairnessRail()}<div class="table-wrap"><div class="poker-table"><div class="felt-grain"></div><div class="table-monogram" aria-hidden="true">xP</div><div class="pot-center ${visual.potChanged ? "is-pulsing" : ""}"><span class="street-label">${escapeHtml(phase.replaceAll("_", " "))}</span><span class="pot-chips" aria-hidden="true"><i></i><i></i><i></i></span><span class="utility-label">Demo pot</span><strong>${moneyAtomic(potAtomic)} <small>${escapeHtml(state.selectedAsset.symbol)}</small></strong><div class="board-cards" aria-label="Community cards">${boardCards}</div></div></div>${seats}</div>${actionDock()}</section></main>`;
 }
 
 async function showProfile() {
@@ -527,9 +622,9 @@ function connectRealtime() {
   socket.addEventListener("message", async (event) => {
     let message; try { message = JSON.parse(event.data); } catch { return; }
     if (message.type === "authenticated") { state.tableConnection = "live"; state.reconnectAttempt = 0; state.reconnectReason = null; state.reconnectNextAt = null; state.lastConnectedAt = new Date().toISOString(); sendRealtime({ type: "subscribe", requestId: requestId("sub"), tableId: state.tableId, afterVersion: state.tableState?.version || 0 }); await beginHoleKeyExchange(); render(); }
-    if (message.type === "table_snapshot") { state.tableState = message.state; render(); }
+    if (message.type === "table_snapshot") { adoptTableState(message.state); render(); }
     if (message.type === "command_result") {
-      state.tableState = message.state;
+      adoptTableState(message.state);
       if (message.requestId === state.leaveRequestId) { await completeTableLeave(); return; }
       render();
     }
@@ -583,7 +678,7 @@ async function completeHoleKeyExchange(serverPublicKey) { const serverKey = awai
 async function decryptHoleCards(envelope) { if (!state.holeKey?.aesKey) throw new Error("Private-card key is unavailable"); const { iv, ciphertext, tag, ...aad } = envelope; const cipher = base64UrlToBytes(ciphertext); const authTag = base64UrlToBytes(tag); const combined = new Uint8Array(cipher.length + authTag.length); combined.set(cipher); combined.set(authTag, cipher.length); const plaintext = await crypto.subtle.decrypt({ name: "AES-GCM", iv: base64UrlToBytes(iv), additionalData: new TextEncoder().encode(canonicalJson(aad)), tagLength: 128 }, state.holeKey.aesKey, combined); return JSON.parse(new TextDecoder().decode(plaintext)); }
 
 function tableAction(type) { const hand = state.tableState?.currentHand; if (!hand?.legalActions) return; const action = { type }; if (type === "raise" || type === "bet") action.to = document.querySelector("#bet-range").value; sendRealtime({ type: "command", command: "act", requestId: requestId("act"), tableId: state.tableId, expectedVersion: state.tableState.version, expectedBettingVersion: hand.betting.version, idempotencyKey: requestId("idem"), action }); }
-async function completeTableLeave() { state.leaveRequestId = null; state.socket?.close(1000, "left table"); state.tableId = null; state.tableState = null; state.holeCards = []; state.lastEvent = null; state.view = "lobby"; await loadLobby({ quiet: true }); toast("Demo seat released. No funds moved."); }
+async function completeTableLeave() { state.leaveRequestId = null; state.socket?.close(1000, "left table"); state.tableId = null; state.tableState = null; state.holeCards = []; state.tableVisual = { handId: null, boardCount: 0, holeCount: 0, potAtomic: 0 }; state.lastEvent = null; state.view = "lobby"; await loadLobby({ quiet: true }); toast("Demo seat released. No funds moved."); }
 function leaveTable() {
   if (!state.tableId || state.tableId === "interface-preview" || state.tableConnection !== "live") { completeTableLeave(); return; }
   if (state.leaveRequestId) return;
