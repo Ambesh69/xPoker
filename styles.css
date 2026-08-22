@@ -3838,33 +3838,50 @@ a:focus-visible {
   letter-spacing: 0.13em;
 }
 
-.table-page .pot-chips {
-  position: relative;
+.table-page .pot-label {
+  display: flex;
+  min-height: 32px;
+  align-items: center;
+  gap: 8px;
+  margin: -1px 0 1px;
+}
+
+.table-page .pot-marker {
   display: block;
-  width: 46px;
-  height: 21px;
-  margin-bottom: 2px;
+  width: 58px;
+  height: 31px;
+  filter: drop-shadow(0 7px 7px rgba(0, 0, 0, 0.32));
 }
 
-.table-page .pot-chips i {
-  position: absolute;
-  bottom: 0;
-  width: 23px;
-  height: 9px;
-  border: 2px dashed rgba(7, 17, 14, 0.7);
-  border-radius: 50%;
-  background: var(--table-brass-light);
-  box-shadow: inset 0 0 0 2px var(--table-brass), 0 3px 8px rgba(0,0,0,.24);
+.table-page .pot-marker svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
 }
 
-.table-page .pot-chips i:nth-child(1) { left: 0; bottom: 1px; }
-.table-page .pot-chips i:nth-child(2) { left: 12px; bottom: 7px; background: var(--table-live); }
-.table-page .pot-chips i:nth-child(3) { left: 23px; bottom: 0; background: #f07f72; }
+.table-page .pot-tray {
+  fill: rgba(4, 20, 15, 0.82);
+  stroke: rgba(235, 216, 145, 0.48);
+  stroke-width: 1.2;
+}
 
-.table-page .pot-center > .utility-label {
+.table-page .pot-chip-edge { fill: #8c713a; }
+.table-page .pot-chip-top { fill: #eddb9a; stroke: #0b2118; stroke-width: 1.2; }
+.table-page .pot-chip-core { fill: rgba(9, 38, 28, 0.35); stroke: #315d49; stroke-width: 1.1; }
+.table-page .pot-chip-mark { fill: none; stroke: #0f2e22; stroke-linecap: round; stroke-width: 1.25; }
+.table-page .pot-chip-rim { fill: none; stroke: rgba(8, 33, 24, 0.72); stroke-width: 1; }
+.table-page .pot-stack-live .pot-chip-edge { fill: #708e35; }
+.table-page .pot-stack-live .pot-chip-top { fill: var(--table-live); }
+.table-page .pot-stack-right .pot-chip-edge { fill: #a89772; }
+.table-page .pot-stack-right .pot-chip-top { fill: #f2ead4; }
+
+.table-page .pot-label .utility-label {
   color: #a9bdb4;
   font-size: 7px;
+  font-weight: 650;
   letter-spacing: 0.14em;
+  text-transform: uppercase;
 }
 
 .table-page .pot-center > strong {
@@ -3882,7 +3899,7 @@ a:focus-visible {
   letter-spacing: 0.08em;
 }
 
-.table-page .pot-center.is-pulsing .pot-chips,
+.table-page .pot-center.is-pulsing .pot-marker,
 .table-page .pot-center.is-pulsing > strong {
   animation: pot-bump 520ms cubic-bezier(.2,.85,.3,1) both;
 }
@@ -4894,4 +4911,134 @@ a:focus-visible {
 
 @media (prefers-reduced-motion: reduce) {
   .table-page .private-deal-status i { animation: none; }
+}
+
+/* Compact table utilities: keep verification available without covering the felt. */
+.table-page details.fairness-rail {
+  top: 16px;
+  right: 18px;
+  bottom: auto;
+  width: 188px;
+  overflow: hidden;
+  border-radius: 14px;
+  transition: width 180ms ease, border-color 180ms ease, background 180ms ease;
+}
+
+.table-page details.fairness-rail[open] {
+  width: 218px;
+  border-color: rgba(235, 216, 145, 0.3);
+  background: rgba(5, 17, 13, 0.94);
+}
+
+.table-page .fairness-title {
+  min-height: 44px;
+  padding: 9px 11px;
+  border-bottom: 0;
+  cursor: pointer;
+  list-style: none;
+  user-select: none;
+}
+
+.table-page .fairness-title::-webkit-details-marker { display: none; }
+.table-page details[open] > .fairness-title { border-bottom: 1px solid rgba(235, 216, 145, 0.12); }
+.table-page .fairness-title:focus-visible { outline: 2px solid var(--table-live); outline-offset: -3px; }
+.table-page .fairness-title strong { font-size: 11px; font-weight: 760; }
+
+.table-page .fairness-state {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.table-page .fairness-title .fairness-state small {
+  font-size: 6px;
+  font-weight: 650;
+}
+
+.table-page .fairness-state svg {
+  width: 12px;
+  height: 12px;
+  fill: none;
+  stroke: var(--table-muted);
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 1.5;
+  transition: transform 180ms ease;
+}
+
+.table-page details[open] .fairness-state svg { transform: rotate(180deg); }
+.table-page .fairness-detail { overflow: hidden; }
+.table-page .fairness-facts { display: grid; padding: 2px 11px 4px; }
+
+.table-page .fairness-facts > span {
+  gap: 7px;
+  padding: 6px 0;
+  grid-template-columns: 62px minmax(0, 1fr);
+}
+
+.table-page .fairness-facts small { font-size: 7px; font-weight: 650; }
+.table-page .fairness-facts strong { font-size: 8px; font-weight: 650; }
+.table-page .fairness-seal,
+.table-page .fairness-rail .audit-link { min-height: 34px; padding: 7px 11px 9px; font-size: 8px; font-weight: 650; }
+
+/* Waiting-state identity is supportive UI, not the table's visual focus. */
+.table-page .seat.is-self:not(:has(.hero-cards)) .player-avatar {
+  width: clamp(58px, 3.2vw, 68px);
+  height: clamp(58px, 3.2vw, 68px);
+  border-radius: 19px;
+}
+
+.table-page .seat.is-self:not(:has(.hero-cards)) .player-identity {
+  min-width: 126px;
+  padding: 7px 11px 8px;
+}
+
+.table-page .seat.is-self:not(:has(.hero-cards)) .player-name { max-width: 138px; font-size: 13px; }
+.table-page .seat.is-self:not(:has(.hero-cards)) .player-stack { font-size: 10px; }
+
+@media (min-width: 981px) {
+  .table-page .seat.zone-top { transform: translate(-50%, calc(-50% - 26px)); }
+  .table-page .seat.zone-top.empty-seat {
+    min-width: 118px;
+    transform: translate(-50%, calc(-50% - 52px));
+  }
+  .table-page .seat.zone-top.empty-seat:hover { transform: translate(-50%, calc(-50% - 52px)) scale(1.035); }
+  .table-page .seat.zone-top.empty-seat .empty-seat-ring { width: 48px; height: 48px; border-radius: 16px; }
+  .table-page .seat.zone-top.empty-seat .empty-seat-ring svg { width: 22px; height: 22px; }
+  .table-page .seat.zone-top.empty-seat .player-name { margin-top: 4px; padding: 3px 7px; font-size: 9px; }
+}
+
+@media (min-width: 981px) and (max-height: 720px) {
+  .table-page .seat.zone-bottom.is-self:not(:has(.hero-cards)) { transform: translate(-50%, calc(-50% - 87px)); }
+  .table-page .seat.zone-bottom.is-self:not(:has(.hero-cards)) .player-avatar {
+    width: 54px;
+    height: 54px;
+    border-radius: 16px;
+  }
+  .table-page .seat.zone-bottom.is-self:not(:has(.hero-cards)) .player-identity {
+    min-width: 118px;
+    padding: 5px 9px 6px;
+  }
+  .table-page .seat.zone-bottom.is-self:not(:has(.hero-cards)) .player-name { font-size: 12px; }
+  .table-page .seat.zone-bottom.is-self:not(:has(.hero-cards)) .player-stack { font-size: 9px; }
+}
+
+@media (max-width: 1350px) {
+  .table-page details.fairness-rail { width: 178px; }
+  .table-page details.fairness-rail[open] { width: 208px; }
+}
+
+@media (max-width: 680px) {
+  .table-page details.fairness-rail { top: 8px; right: 8px; width: 154px; }
+  .table-page details.fairness-rail[open] { width: 190px; }
+  .table-page .fairness-title { min-height: 38px; padding: 7px 9px; }
+  .table-page .fairness-title strong { font-size: 9px; }
+  .table-page .fairness-state small { display: none; }
+  .table-page .fairness-facts { padding-right: 9px; padding-left: 9px; }
+  .table-page .pot-marker { width: 50px; height: 27px; }
+  .table-page .pot-label .utility-label { font-size: 8px; }
+  .table-page .seat.is-self:not(:has(.hero-cards)) .player-avatar { width: 50px; height: 50px; border-radius: 15px; }
+  .table-page .seat.is-self:not(:has(.hero-cards)) .player-identity { min-width: 92px; padding: 5px 7px 6px; }
+  .table-page .seat.is-self:not(:has(.hero-cards)) .player-name { max-width: 98px; font-size: 10px; }
+  .table-page .seat.is-self:not(:has(.hero-cards)) .player-stack { font-size: 8px; }
 }
