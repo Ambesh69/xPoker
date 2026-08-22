@@ -184,7 +184,27 @@ function operationsView() {
 }
 
 function modalShell({ eyebrow, title, description = "", body, footer = "", wide = false, kind = "" }) { return `<div class="modal-overlay" data-action="close-modal"><section class="modal ${wide ? "modal-wide" : ""} ${kind}" role="dialog" aria-modal="true" aria-labelledby="modal-title" data-modal-panel><header class="modal-head"><div><span class="eyebrow">${eyebrow}</span><h2 id="modal-title">${title}</h2>${description ? `<p>${description}</p>` : ""}</div><button class="icon-btn" data-action="close-modal" aria-label="Close">×</button></header><div class="modal-body">${body}</div>${footer ? `<footer class="modal-foot">${footer}</footer>` : ""}</section></div>`; }
-function openModal(html) { document.querySelector("#modal-root").innerHTML = html; document.body.style.overflow = "hidden"; bindEvents(document.querySelector("#modal-root")); setTimeout(() => document.querySelector(".modal button, .modal input")?.focus(), 0); }
+function openModal(html, { reusePanel = false } = {}) {
+  const root = document.querySelector("#modal-root");
+  if (reusePanel) {
+    const current = root.querySelector(".wallet-modal");
+    const template = document.createElement("template");
+    template.innerHTML = html.trim();
+    const next = template.content.querySelector(".wallet-modal");
+    if (current && next) {
+      const scrollTop = current.scrollTop;
+      current.className = next.className;
+      current.innerHTML = next.innerHTML;
+      current.scrollTop = scrollTop;
+      bindEvents(current);
+      return;
+    }
+  }
+  root.innerHTML = html;
+  document.body.style.overflow = "hidden";
+  bindEvents(root);
+  setTimeout(() => document.querySelector(".modal button, .modal input")?.focus(), 0);
+}
 function closeModal() { document.querySelector("#modal-root").innerHTML = ""; document.body.style.overflow = ""; state.walletEntryMode = "wallet"; }
 
 function walletInitials(name) { return String(name || "Wallet").split(/\s+/).map((part) => part[0]).join("").slice(0, 2).toUpperCase(); }
@@ -232,14 +252,15 @@ function privyWalletChoices(privyReady) {
   return `<div class="wallet-choice-grid">${PRIVY_WALLETS.map((wallet) => {
     const detected = privyWalletDetected(wallet);
     const busy = state.privyBusy === wallet.id;
-    const status = busy ? "Check your wallet…" : detected ? "Installed" : wallet.id === "wallet_connect_qr_solana" ? "Scan QR" : "Open or install";
+    const waiting = state.backend === "online" && !privyReady;
+    const status = busy ? "Check your wallet…" : waiting ? "Loading…" : detected ? "Installed" : wallet.id === "wallet_connect_qr_solana" ? "Scan QR" : "Open or install";
     return `<button class="wallet-choice wallet-choice-${escapeHtml(wallet.id)}" data-action="connect-privy-wallet" data-wallet-id="${escapeHtml(wallet.id)}" ${privyReady && !state.privyBusy ? "" : "disabled"}><span class="wallet-choice-logo">${privyWalletIcon(wallet)}</span><span class="wallet-choice-copy"><strong>${escapeHtml(wallet.name)}</strong><small class="${detected ? "is-detected" : ""}">${escapeHtml(status)}</small></span><span class="wallet-choice-arrow" aria-hidden="true">${busy ? "···" : "→"}</span></button>`;
   }).join("")}</div>`;
 }
 function walletEntryBody(serverReady, recovery) {
   if (state.walletEntryMode === "guest") return `<div data-wallet-modal data-wallet-entry class="wallet-entry guest-entry">${recovery}<button class="wallet-back" data-action="show-wallet-login">← Use a wallet instead</button><div class="guest-entry-title"><span>G</span><div><strong>Enter with a guest profile</strong><small>Temporary identity · demo credits only</small></div></div><label class="field"><span class="field-label">Display name</span><input class="input" id="guest-name" maxlength="24" value="Market Player" autocomplete="nickname" /></label>${walletInviteField()}<button class="btn btn-accent guest-submit" data-action="guest-session" ${serverReady ? "" : "disabled"}>Enter beta as guest</button>${serverReady ? "" : `<div class="preview-fallback"><p class="legal-note warning-note">The multiplayer server is unavailable.</p><button class="btn" data-action="preview-session">Open interface preview</button></div>`}</div>`;
   const privyReady = serverReady && state.privyReady;
-  return `<div data-wallet-modal data-wallet-entry class="wallet-entry">${recovery}${privyWalletChoices(privyReady)}<div class="wallet-picker-meta"><span><i></i> Secured by Privy</span><span>Solana · SIWS</span></div>${walletInviteField()}<button class="guest-choice" data-action="show-guest-login"><span><strong>Just looking around?</strong><small>Use a temporary guest profile</small></span><b>Continue as guest →</b></button>${serverReady ? state.privyReady ? "" : `<p class="privy-loading-note">Loading wallet connections…</p>` : `<div class="preview-fallback"><p class="legal-note warning-note">The multiplayer server is unavailable.</p><button class="btn" data-action="preview-session">Open interface preview</button></div>`}</div>`;
+  return `<div data-wallet-modal data-wallet-entry class="wallet-entry">${recovery}${privyWalletChoices(privyReady)}<div class="wallet-picker-meta"><span><i></i> Secured by Privy</span><span>Solana · SIWS</span></div>${walletInviteField()}<button class="guest-choice" data-action="show-guest-login"><span><strong>Just looking around?</strong><small>Use a temporary guest profile</small></span><b>Continue as guest →</b></button>${serverReady ? "" : `<div class="preview-fallback"><p class="legal-note warning-note">The multiplayer server is unavailable.</p><button class="btn" data-action="preview-session">Open interface preview</button></div>`}</div>`;
 }
 function walletModal(after = state.pendingAfterConnect) {
   state.pendingAfterConnect = after;
@@ -248,7 +269,7 @@ function walletModal(after = state.pendingAfterConnect) {
   const serverReady = state.backend === "online";
   const recovery = state.sessionRecovery === "expired" ? `<div class="recovery-note"><span>↻</span><div><strong>Session expired</strong><small>Reconnect to continue. Your table and wallet were not changed.</small></div></div>` : "";
   const canDo = state.profile?.isGuest ? "Join demo rooms, send poker actions, and resume a table." : "Join demo rooms, send poker actions, resume a table, and read the approved ten public token balances.";
-  openModal(modalShell({ kind: "wallet-modal", eyebrow: state.profile ? "Session details" : "Solana sign-in", title: state.profile ? "Your beta session" : state.walletEntryMode === "guest" ? "Play without a wallet" : "Choose your wallet", description: state.profile ? "Your temporary identity and its read-only permissions." : state.walletEntryMode === "guest" ? "Create an expiring profile for the zero-value beta." : "Select the wallet you already use.", body: state.profile ? `<div data-wallet-modal>${walletSafetyReceipt()}<div class="safety-box"><strong>This session can</strong><span>${canDo}</span><strong>This session cannot</strong><span>Spend tokens, approve a program, deposit, withdraw, or cash out.</span></div></div>` : walletEntryBody(serverReady, recovery), footer: state.profile ? `<span class="balance-note">Bearer session stored in this tab only</span><button class="btn" data-action="logout">End session</button>` : `<span class="wallet-foot-signal"><i></i> Identity protected by Privy</span><span class="wallet-foot-boundary">DEMO · NO FUNDS</span>` }));
+  openModal(modalShell({ kind: "wallet-modal", eyebrow: state.profile ? "Session details" : "Solana sign-in", title: state.profile ? "Your beta session" : state.walletEntryMode === "guest" ? "Play without a wallet" : "Choose your wallet", description: state.profile ? "Your temporary identity and its read-only permissions." : state.walletEntryMode === "guest" ? "Create an expiring profile for the zero-value beta." : "Select the wallet you already use.", body: state.profile ? `<div data-wallet-modal>${walletSafetyReceipt()}<div class="safety-box"><strong>This session can</strong><span>${canDo}</span><strong>This session cannot</strong><span>Spend tokens, approve a program, deposit, withdraw, or cash out.</span></div></div>` : walletEntryBody(serverReady, recovery), footer: state.profile ? `<span class="balance-note">Bearer session stored in this tab only</span><button class="btn" data-action="logout">End session</button>` : `<span class="wallet-foot-signal"><i></i> Identity protected by Privy</span><span class="wallet-foot-boundary">DEMO · NO FUNDS</span>` }), { reusePanel: true });
   if (state.profile && !state.profile.isGuest && state.holdings.status === "idle") loadHoldings();
   if (!state.profile && state.walletEntryMode === "wallet") void ensurePrivy().catch(() => {
     if (document.querySelector("[data-wallet-entry]")) toast("Wallet connections could not load. Try again in a moment.");
@@ -632,12 +653,12 @@ function handleAction(event) {
 document.addEventListener("keydown", (event) => { if (event.key === "Escape" && document.querySelector(".modal-overlay")) closeModal(); });
 function refreshWallets() {
   state.wallets = compatibleWallets(walletRegistry.get(), legacyWallets(window));
-  if (document.querySelector("[data-wallet-modal]") && !state.profile) walletModal();
+  if (document.querySelector("[data-wallet-entry]") && !state.profile && state.walletEntryMode === "wallet") walletModal();
 }
 walletRegistry.onChange(refreshWallets);
 window.addEventListener("xpoker:privy-ready", (event) => {
   state.privyReady = Boolean(event.detail?.ready);
-  if (document.querySelector("[data-wallet-entry]") && !state.profile) walletModal();
+  if (document.querySelector("[data-wallet-entry]") && !state.profile && state.walletEntryMode === "wallet") walletModal();
 });
 window.addEventListener("offline", () => {
   state.networkOnline = false;

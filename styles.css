@@ -3311,7 +3311,6 @@ a:focus-visible {
 
 .wallet-picker-meta span:first-child { display: inline-flex; align-items: center; gap: 6px; }
 .wallet-picker-meta i { width: 5px; height: 5px; border-radius: 50%; background: #5aaa70; box-shadow: 0 0 0 3px rgba(90, 170, 112, 0.1); }
-.privy-loading-note { margin: 9px 0 0; color: var(--muted); font-family: var(--mono); font-size: 8px; text-align: center; }
 
 .wallet-modal .provider-list {
   display: grid;
