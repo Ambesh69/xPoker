@@ -72,7 +72,8 @@ const state = {
   selectedRoom: FALLBACK_ROOMS[0], selectedAsset: FALLBACK_ASSETS[0], buyInAmount: 20, hostGame: "NLH",
   tableId: null, tableState: null, tableConnection: "offline", socket: null, reconnectTimer: null,
   reconnectAttempt: 0, holeKey: null, holeHandId: null, holeCards: [], holeDeliverySequence: 0, lastEvent: null, pendingAfterConnect: null, audit: null,
-  tableVisual: { handId: null, boardCount: 0, holeCount: 0, potAtomic: 0 },
+  tableVisual: { handId: null, boardCount: 0, holeCount: 0, potAtomic: 0, phase: null },
+  lastHandPresentation: null, presentationTimer: null, pendingTableAction: null,
   leaveRequestId: null,
   handHistory: [], operations: null, operationsPlayers: [], operationsReports: [], operationsInvites: [],
   wallets: [], pendingAccessInvite: "", sessionMeta: storedJson(sessionStorage, SESSION_META_KEY), sessionRecovery: null,
@@ -407,28 +408,48 @@ function buyStocksModal(asset = state.selectedAsset) { state.selectedAsset = ass
 async function takeSeat() {
   if (!state.profile) { closeModal(); walletModal("buyin"); return; }
   const button = document.querySelector('[data-action="take-seat"]'); button.disabled = true; button.textContent = "Seating…";
-  if (state.backend !== "online") { closeModal(); state.tableId = "interface-preview"; state.tableVisual = { handId: null, boardCount: 0, holeCount: 0, potAtomic: 0 }; clearHoleCards(); state.tableState = previewTableState(); state.view = "table"; state.tableConnection = "preview"; render(); toast("Interface seat created locally. There is no multiplayer server on this deployment."); return; }
-  try { const result = await api("/v1/beta/tables/join", { method: "POST", authenticated: true, body: { roomId: state.selectedRoom.id, assetSymbol: state.selectedAsset.symbol, buyInAtomic: String(Math.round(state.buyInAmount * 100)) } }); closeModal(); state.tableId = result.tableId; state.tableVisual = { handId: null, boardCount: 0, holeCount: 0, potAtomic: 0 }; state.tableState = result.state; state.view = "table"; clearHoleCards(); render(); connectRealtime(); toast(`${money(state.buyInAmount)} in demo credits seated. No funds moved.`); }
+  if (state.backend !== "online") { closeModal(); state.tableId = "interface-preview"; state.tableVisual = { handId: null, boardCount: 0, holeCount: 0, potAtomic: 0, phase: null }; clearHoleCards(); state.tableState = previewTableState(); state.view = "table"; state.tableConnection = "preview"; render(); toast("Interface seat created locally. There is no multiplayer server on this deployment."); return; }
+  try { const result = await api("/v1/beta/tables/join", { method: "POST", authenticated: true, body: { roomId: state.selectedRoom.id, assetSymbol: state.selectedAsset.symbol, buyInAtomic: String(Math.round(state.buyInAmount * 100)) } }); closeModal(); state.tableId = result.tableId; state.tableVisual = { handId: null, boardCount: 0, holeCount: 0, potAtomic: 0, phase: null }; state.tableState = result.state; state.view = "table"; clearHoleCards(); render(); connectRealtime(); toast(`${money(state.buyInAmount)} in demo credits seated. No funds moved.`); }
   catch (error) { button.disabled = false; button.textContent = "Take demo seat"; toast(error.message); }
 }
 
 function previewTableState() { return { version: 1, status: "WAITING", tableId: "interface-preview", rules: state.selectedRoom.rules, seats: [{ playerId: state.profile?.wallet || "PreviewPlayer", seat: 3, stackAtomic: String(state.buyInAmount * 100), status: "SEATED", timeBankMs: 60_000 }], handNumber: 0, buttonSeat: null, currentHand: null, lastResult: null }; }
 function clearHoleCards() { state.holeHandId = null; state.holeCards = []; }
+function clearHandPresentation() { clearTimeout(state.presentationTimer); state.presentationTimer = null; state.lastHandPresentation = null; }
 function adoptTableState(nextState) {
+  const currentHand = state.tableState?.currentHand;
   const nextHandId = nextState?.currentHand?.handId || null;
+  if (currentHand && !nextHandId && nextState?.lastResult?.handId === currentHand.handId) {
+    clearTimeout(state.presentationTimer);
+    state.lastHandPresentation = {
+      hand: structuredClone(currentHand),
+      handId: currentHand.handId,
+      holeCards: structuredClone(state.holeCards),
+      result: structuredClone(nextState.lastResult),
+    };
+    state.presentationTimer = setTimeout(() => {
+      if (!state.tableState?.currentHand && state.lastHandPresentation?.handId === currentHand.handId) {
+        state.lastHandPresentation = null;
+        if (state.view === "table") render();
+      }
+    }, 3_200);
+  } else if (nextHandId && state.lastHandPresentation) clearHandPresentation();
   if (state.holeHandId !== nextHandId) clearHoleCards();
   state.tableState = nextState;
 }
 
 function tableVisualTransition(hand, boardCount, holeCount, potAtomic) {
   const handId = hand?.handId || null;
+  const phase = hand?.betting?.phase || null;
   const previous = state.tableVisual;
   const handChanged = Boolean(handId && handId !== previous.handId);
   const boardStart = handChanged ? 0 : Math.min(previous.boardCount, boardCount);
   const holeStart = handChanged ? 0 : Math.min(previous.holeCount, holeCount);
-  const potChanged = Boolean(handId && previous.handId === handId && previous.potAtomic !== potAtomic);
-  state.tableVisual = { handId, boardCount, holeCount, potAtomic };
-  return { handChanged, boardStart, holeStart, potChanged };
+  const previousPotAtomic = handChanged ? 0 : previous.potAtomic;
+  const potChanged = Boolean(handId && previousPotAtomic !== potAtomic);
+  const streetChanged = Boolean(handId && previous.handId === handId && previous.phase && previous.phase !== phase);
+  state.tableVisual = { handId, boardCount, holeCount, potAtomic, phase };
+  return { handChanged, boardStart, holeStart, potChanged, previousPotAtomic, streetChanged };
 }
 
 function seatName(player) { return player.playerId === state.profile?.wallet ? state.profile.displayName : shortWallet(player.playerId); }
@@ -473,31 +494,56 @@ function turnTimerStyle(turn, playerId) {
   return `--turn-duration:${duration}ms;--turn-delay:-${elapsed}ms;`;
 }
 
-function tableSeat({ actualSeat, displayIndex, x, y }, visual) {
+function latestActionFor(hand, playerId) {
+  const event = state.lastEvent;
+  if (!hand || !event || !["ACTION_APPLIED", "ACTION_TIMED_OUT"].includes(event.type)) return null;
+  if (event.payload?.betting?.handId && event.payload.betting.handId !== hand.handId) return null;
+  if (event.payload?.playerId !== playerId) return null;
+  const occurredAt = Date.parse(event.occurredAt);
+  if (Number.isFinite(occurredAt) && Date.now() - occurredAt > 4_000) return null;
+  const type = event.type === "ACTION_TIMED_OUT" ? "timeout" : String(event.payload?.action?.type || "action").toLowerCase();
+  const labels = { fold: "FOLD", check: "CHECK", call: "CALL", bet: "BET", raise: "RAISE", timeout: "TIME OUT" };
+  return { type, label: labels[type] || type.replaceAll("_", " ").toUpperCase() };
+}
+
+function chipStackHtml() {
+  return '<span class="wager-chips" aria-hidden="true"><i></i><i></i><i></i></span>';
+}
+
+function tableSeat({ actualSeat, displayIndex, x, y }, visual, presentation = {}) {
   const table = state.tableState;
   const player = table?.seats.find((candidate) => candidate.seat === actualSeat);
-  const hand = table?.currentHand;
+  const hand = presentation.hand || table?.currentHand;
   const handPlayer = hand?.betting?.players.find((candidate) => candidate.seat === actualSeat);
   const active = hand?.turn?.playerId === player?.playerId;
   const isSelf = player?.playerId === state.profile?.wallet;
   const zone = y < 20 ? "top" : y > 75 ? "bottom" : x < 25 ? "left" : x > 75 ? "right" : "middle";
-  const seatStyle = `--seat-x:${x}%;--seat-y:${y}%;${turnTimerStyle(hand?.turn, player?.playerId)}`;
+  const seatStyle = `--seat-x:${x}%;--seat-y:${y}%;--seat-index:${displayIndex};${turnTimerStyle(hand?.turn, player?.playerId)}`;
   if (!player) return `<div class="seat empty-seat zone-${zone}" style="${seatStyle}"><span class="empty-seat-ring" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14" /></svg></span><span class="player-name">Open seat</span></div>`;
 
   const initials = isSelf ? "YOU" : shortWallet(player.playerId).slice(0, 2).toUpperCase();
   const expectedCards = hand?.game === "PLO4" ? 4 : 2;
   const inHand = Boolean(handPlayer);
-  const privateDealReady = Boolean(isSelf && inHand && state.holeHandId === hand?.handId && state.holeCards.length === expectedCards);
-  const privateDealPending = Boolean(isSelf && inHand && !privateDealReady);
-  const shownCards = privateDealReady ? state.holeCards.map((reveal) => reveal.card.code) : Array.from({ length: inHand ? expectedCards : 0 }, () => "?");
+  const visibleHoleCards = presentation.resultMode ? presentation.holeCards || [] : state.holeCards;
+  const visibleHoleHandId = presentation.resultMode ? hand?.handId : state.holeHandId;
+  const privateDealReady = Boolean(isSelf && inHand && visibleHoleHandId === hand?.handId && visibleHoleCards.length === expectedCards);
+  const privateDealPending = Boolean(isSelf && inHand && !presentation.resultMode && !privateDealReady);
+  const shownCards = privateDealReady ? visibleHoleCards.map((reveal) => reveal.card.code) : Array.from({ length: inHand ? expectedCards : 0 }, () => "?");
   const cards = shownCards.length ? `<span class="hole-cards ${isSelf ? "hero-cards" : "opponent-cards"} cards-${shownCards.length} ${privateDealPending ? "private-deal-pending" : ""}">${shownCards.map((code, index) => {
     const fan = (index - (shownCards.length - 1) / 2) * (isSelf ? 4.5 : 3);
-    const shouldAnimate = privateDealReady ? index >= visual.holeStart : visual.handChanged;
-    return cardHtml(code, { extra: isSelf ? "private-card" : "opponent-card", index, animate: shouldAnimate, style: `--card-rotate:${fan}deg;` });
+    const shouldAnimate = !presentation.resultMode && (privateDealReady ? index >= visual.holeStart : visual.handChanged);
+    const privateReveal = privateDealReady && !visual.handChanged && visual.holeStart === 0;
+    const dealDelay = privateReveal ? index * 72 : 180 + index * 190 + displayIndex * 42;
+    return cardHtml(code, { extra: `${isSelf ? "private-card" : "opponent-card"} ${privateReveal ? "private-reveal" : ""}`, index, animate: shouldAnimate, style: `--card-rotate:${fan}deg;--deal-delay:${dealDelay}ms;` });
   }).join("")}</span>${privateDealPending ? '<span class="private-deal-status"><i></i>Securing your cards…</span>' : ""}` : "";
   const avatarColor = isSelf ? "#d8ff73" : ["#f5bd66", "#7cc8b3", "#ef8d79", "#83a8ff", "#c39aef", "#e5d27c"][displayIndex % 6];
   const flags = [handPlayer?.folded ? "folded" : "", handPlayer?.allIn ? "all-in" : "", player.status === "SITTING_OUT" ? "sitting-out" : ""].filter(Boolean).join(" ");
-  return `<div class="seat zone-${zone} ${isSelf ? "is-self" : ""} ${active ? "active" : ""} ${flags}" style="${seatStyle}">${cards}<span class="player-avatar" style="--avatar-color:${avatarColor}"><span class="avatar-initials">${initials}</span>${active ? '<svg class="turn-ring" viewBox="0 0 64 64" aria-hidden="true"><circle cx="32" cy="32" r="29" pathLength="100" /></svg>' : ""}${table.buttonSeat === player.seat ? '<span class="dealer-chip">D</span>' : ""}</span><span class="player-identity"><span class="player-name">${escapeHtml(seatName(player))}${isSelf ? '<small>YOU</small>' : ""}</span><span class="player-stack">${moneyAtomic(handPlayer?.stack ?? player.stackAtomic)} <b>${escapeHtml(state.selectedAsset.symbol)}</b></span></span>${handPlayer?.allIn ? '<span class="seat-state">ALL IN</span>' : ""}${handPlayer && handPlayer.streetContribution !== "0" ? `<span class="seat-bet"><i></i>${moneyAtomic(handPlayer.streetContribution)}</span>` : ""}</div>`;
+  const action = presentation.resultMode ? null : latestActionFor(hand, player.playerId);
+  const payout = presentation.result?.payouts?.find((entry) => entry.playerId === player.playerId);
+  const winner = Boolean(payout && Number(payout.amountAtomic) > 0);
+  const stack = presentation.resultMode ? player.stackAtomic : (handPlayer?.stack ?? player.stackAtomic);
+  const betIsNew = Boolean(handPlayer && handPlayer.streetContribution !== "0" && (visual.handChanged || action));
+  return `<div class="seat zone-${zone} ${isSelf ? "is-self" : ""} ${active ? "active" : ""} ${winner ? "is-winner" : ""} ${flags}" style="${seatStyle}">${cards}${action ? `<span class="seat-action action-${escapeHtml(action.type)}">${escapeHtml(action.label)}</span>` : ""}<span class="player-avatar" style="--avatar-color:${avatarColor}"><span class="avatar-initials">${initials}</span>${active ? '<svg class="turn-ring" viewBox="0 0 64 64" aria-hidden="true"><circle cx="32" cy="32" r="29" pathLength="100" /></svg>' : ""}${table.buttonSeat === player.seat ? '<span class="dealer-chip">D</span>' : ""}</span><span class="player-identity"><span class="player-name">${escapeHtml(seatName(player))}${isSelf ? '<small>YOU</small>' : ""}</span><span class="player-stack">${moneyAtomic(stack)} <b>${escapeHtml(state.selectedAsset.symbol)}</b></span></span>${handPlayer?.allIn ? '<span class="seat-state">ALL IN</span>' : ""}${winner ? `<span class="winner-payout">+${moneyAtomic(payout.amountAtomic)}</span>` : ""}${handPlayer && handPlayer.streetContribution !== "0" ? `<span class="seat-bet ${betIsNew ? "is-new" : ""}">${chipStackHtml()}<strong>${moneyAtomic(handPlayer.streetContribution)}</strong></span>` : ""}</div>`;
 }
 
 function fairnessRail() {
@@ -523,21 +569,36 @@ function actionDock() {
   return `<div class="action-dock action-ready"><button class="btn fold-action" data-action="table-action" data-poker="fold" ${legal.canFold ? "" : "disabled"}><small>Give up</small><strong>Fold</strong></button><button class="btn btn-primary primary-action" data-action="table-action" data-poker="${primary[0]}"><small>${legal.canCheck ? "No wager" : "Match wager"}</small><strong>${primary[1]}</strong></button><div class="bet-control"><span>${legal.canBet ? "Bet to" : "Raise to"}</span><strong id="raise-value">${moneyAtomic(min)}</strong><input class="range" id="bet-range" type="range" min="${min}" max="${max}" value="${min}" step="1" ${increase ? "" : "disabled"} aria-label="Raise target" /><button class="range-submit" data-action="table-action" data-poker="${legal.canBet ? "bet" : "raise"}" ${increase ? "" : "disabled"}>${legal.canBet ? "Bet" : "Raise"}</button></div></div>`;
 }
 
+function resultDock(result) {
+  const winners = (result?.payouts || []).filter((payout) => Number(payout.amountAtomic) > 0);
+  const total = winners.reduce((sum, payout) => sum + Number(payout.amountAtomic), 0);
+  const label = winners.length === 1 ? seatName({ playerId: winners[0].playerId }) : `${winners.length} players split the pot`;
+  return `<div class="action-dock result-dock"><span class="result-check">✓</span><span><small>HAND COMPLETE</small><strong>${escapeHtml(label)}</strong></span><span class="result-total">+${moneyAtomic(total)} <small>${escapeHtml(state.selectedAsset.symbol)}</small></span><span class="result-next">Next verified shuffle…</span></div>`;
+}
+
+function revealedCardCode(value) { return typeof value === "string" ? value : value?.code || value?.card?.code || "?"; }
+
 function tableView() {
   const room = state.selectedRoom;
   const table = state.tableState || previewTableState();
-  const hand = table.currentHand;
-  const board = hand?.publicReveals?.map((reveal) => reveal.card.code) || [];
+  const resultPresentation = !table.currentHand && state.lastHandPresentation?.handId === table.lastResult?.handId ? state.lastHandPresentation : null;
+  const hand = table.currentHand || resultPresentation?.hand || null;
+  const board = resultPresentation?.result?.boards?.[0]?.map(revealedCardCode) || hand?.publicReveals?.map((reveal) => reveal.card.code) || [];
   const potAtomic = hand?.betting?.players?.reduce((sum, player) => sum + Number(player.contributed), 0) || 0;
-  const visual = tableVisualTransition(hand, board.length, state.holeCards.length, potAtomic);
-  const tableMessage = table.status === "WAITING" ? table.seats.length < 2 ? `${table.seats.length}/${table.rules.seats} seated · waiting for a second player` : `${table.seats.length}/${table.rules.seats} seated · dealer preparing the next fair hand` : hand?.turn ? `Action is on ${shortWallet(hand.turn.playerId)}` : "Dealer is resolving the hand";
-  const phase = hand?.betting?.phase || (table.status === "WAITING" ? "TABLE OPEN" : "DEALING");
+  const visibleHoleCount = resultPresentation?.holeCards?.length ?? state.holeCards.length;
+  const visual = tableVisualTransition(hand, board.length, visibleHoleCount, potAtomic);
+  const winners = resultPresentation?.result?.payouts?.filter((payout) => Number(payout.amountAtomic) > 0) || [];
+  const tableMessage = resultPresentation ? `${winners.length === 1 ? seatName({ playerId: winners[0].playerId }) : "Split pot"} wins the hand` : table.status === "WAITING" ? table.seats.length < 2 ? `${table.seats.length}/${table.rules.seats} seated · waiting for a second player` : `${table.seats.length}/${table.rules.seats} seated · dealer preparing the next fair hand` : hand?.turn ? `Action is on ${shortWallet(hand.turn.playerId)}` : "Dealer is resolving the hand";
+  const phase = resultPresentation ? "PAYOUT" : hand?.betting?.phase || (table.status === "WAITING" ? "TABLE OPEN" : "DEALING");
   const game = gameLabel(hand?.game || room.game);
-  const seats = tableSeatLayout(table).map((seat) => tableSeat(seat, visual)).join("");
+  const presentation = { hand, resultMode: Boolean(resultPresentation), holeCards: resultPresentation?.holeCards, result: resultPresentation?.result };
+  const seats = tableSeatLayout(table).map((seat) => tableSeat(seat, visual, presentation)).join("");
   const boardCards = Array.from({ length: 5 }, (_, index) => board[index]
-    ? cardHtml(board[index], { extra: "community-card is-revealed", index, animate: index >= visual.boardStart })
-    : cardHtml("?", { extra: "community-card card-slot", index })).join("");
-  return `<main class="table-page"><header class="table-bar"><div class="table-title"><button class="icon-btn table-exit" data-action="leave-table" aria-label="Leave table"><svg viewBox="0 0 24 24"><path d="m15 18-6-6 6-6" /></svg></button><div><span class="table-kicker">${escapeHtml(game)} · ${moneyAtomic(room.rules.smallBlindAtomic)} / ${moneyAtomic(room.rules.bigBlindAtomic)}</span><h1>${escapeHtml(room.name)}</h1></div></div><div class="table-meta"><span class="tag"><small>Hand</small>#${table.handNumber}</span><span class="tag"><small>Sequence</small>${table.version}</span><span class="tag asset-table-tag"><small>Table asset</small>${escapeHtml(state.selectedAsset.symbol)}</span><span class="status-pill"><i class="market-dot"></i>Demo · no funds</span></div></header><section class="poker-stage">${connectionRecoveryBanner()}<div class="table-toast"><span></span>${escapeHtml(tableMessage)}</div>${fairnessRail()}<div class="table-wrap"><div class="poker-table"><div class="felt-grain"></div><div class="table-monogram" aria-hidden="true">xP</div><div class="pot-center ${visual.potChanged ? "is-pulsing" : ""}"><span class="street-label">${escapeHtml(phase.replaceAll("_", " "))}</span><span class="pot-label"><span class="pot-marker" aria-hidden="true"><svg viewBox="0 0 88 46"><path class="pot-tray" d="M6 30c11 8 65 8 76 0l-4 8c-14 8-54 8-68 0Z"/><g class="pot-stack pot-stack-left"><path class="pot-chip-edge" d="M10 21v5c0 3 5.4 5.4 12 5.4S34 29 34 26v-5Z"/><ellipse class="pot-chip-top" cx="22" cy="21" rx="12" ry="5.2"/><ellipse class="pot-chip-core" cx="22" cy="21" rx="7.2" ry="3"/><path class="pot-chip-mark" d="M22 16v3m0 4v3M10.5 21h4m15 0h4"/></g><g class="pot-stack pot-stack-live"><path class="pot-chip-edge" d="M31 12v7c0 3.2 5.8 5.8 13 5.8s13-2.6 13-5.8v-7Z"/><path class="pot-chip-rim" d="M31 15c0 3.2 5.8 5.8 13 5.8S57 18.2 57 15"/><ellipse class="pot-chip-top" cx="44" cy="12" rx="13" ry="5.8"/><ellipse class="pot-chip-core" cx="44" cy="12" rx="7.7" ry="3.3"/><path class="pot-chip-mark" d="M44 6.5V10m0 4v3.5M31.5 12h4m17 0h4"/></g><g class="pot-stack pot-stack-right"><path class="pot-chip-edge" d="M54 22v5c0 3 5.4 5.4 12 5.4S78 30 78 27v-5Z"/><ellipse class="pot-chip-top" cx="66" cy="22" rx="12" ry="5.2"/><ellipse class="pot-chip-core" cx="66" cy="22" rx="7.2" ry="3"/><path class="pot-chip-mark" d="M66 17v3m0 4v3M54.5 22h4m15 0h4"/></g></svg></span><span class="utility-label">Demo pot</span></span><strong>${moneyAtomic(potAtomic)} <small>${escapeHtml(state.selectedAsset.symbol)}</small></strong><div class="board-cards" aria-label="Community cards">${boardCards}</div></div></div>${seats}</div>${actionDock()}</section></main>`;
+    ? cardHtml(board[index], { extra: `community-card is-revealed ${index >= visual.boardStart ? "is-new-street" : ""}`, index, animate: !resultPresentation && index >= visual.boardStart, style: `--deal-x:${(2 - index) * 92}px;--deal-delay:${Math.max(0, index - visual.boardStart) * 105}ms;` })
+    : `<span class="community-card board-slot" style="--deal-index:${index}" aria-hidden="true"></span>`).join("");
+  const tableMotion = visual.handChanged ? '<div class="deal-curtain" aria-hidden="true"><span><b>x</b>P</span><small>VERIFIED SHUFFLE</small></div>' : "";
+  const streetMotion = !resultPresentation && board.length > visual.boardStart ? `<span class="street-sweep street-${board.length === 3 ? "flop" : board.length === 4 ? "turn" : "river"}" aria-hidden="true"></span>` : "";
+  return `<main class="table-page"><header class="table-bar"><div class="table-title"><button class="icon-btn table-exit" data-action="leave-table" aria-label="Leave table"><svg viewBox="0 0 24 24"><path d="m15 18-6-6 6-6" /></svg></button><div><span class="table-kicker">${escapeHtml(game)} · ${moneyAtomic(room.rules.smallBlindAtomic)} / ${moneyAtomic(room.rules.bigBlindAtomic)}</span><h1>${escapeHtml(room.name)}</h1></div></div><div class="table-meta"><span class="tag"><small>Hand</small>#${table.handNumber}</span><span class="tag"><small>Sequence</small>${table.version}</span><span class="tag asset-table-tag"><small>Table asset</small>${escapeHtml(state.selectedAsset.symbol)}</span><span class="status-pill"><i class="market-dot"></i>Demo · no funds</span></div></header><section class="poker-stage ${resultPresentation ? "showing-result" : ""}">${connectionRecoveryBanner()}<div class="table-toast"><span></span>${escapeHtml(tableMessage)}</div>${fairnessRail()}<div class="table-wrap"><div class="poker-table"><div class="felt-grain"></div><div class="table-monogram" aria-hidden="true">xP</div>${tableMotion}<div class="pot-center ${visual.potChanged ? "is-pulsing" : ""}">${streetMotion}<span class="street-label">${escapeHtml(phase.replaceAll("_", " "))}</span><span class="pot-label"><span class="pot-marker" aria-hidden="true">${chipStackHtml()}</span><span class="utility-label">Pot</span></span><strong class="pot-total"><span class="pot-number" data-pot-from="${visual.previousPotAtomic}" data-pot-to="${potAtomic}">${moneyAtomic(potAtomic)}</span> <small>${escapeHtml(state.selectedAsset.symbol)}</small></strong><div class="board-cards" aria-label="Community cards">${boardCards}</div></div></div>${seats}</div>${resultPresentation ? resultDock(resultPresentation.result) : actionDock()}</section></main>`;
 }
 
 async function showProfile() {
@@ -627,6 +688,7 @@ function connectRealtime() {
     if (message.type === "authenticated") { state.tableConnection = "live"; state.reconnectAttempt = 0; state.reconnectReason = null; state.reconnectNextAt = null; state.lastConnectedAt = new Date().toISOString(); sendRealtime({ type: "subscribe", requestId: requestId("sub"), tableId: state.tableId, afterVersion: state.tableState?.version || 0 }); await beginHoleKeyExchange(); render(); }
     if (message.type === "table_snapshot") { adoptTableState(message.state); render(); }
     if (message.type === "command_result") {
+      state.pendingTableAction = null;
       adoptTableState(message.state);
       if (message.requestId === state.leaveRequestId) { await completeTableLeave(); return; }
       render();
@@ -652,7 +714,7 @@ function connectRealtime() {
         render();
       } catch { if (state.socket !== socket) return; toast("Private cards could not be decrypted. Reconnecting safely."); socket.close(4400, "private deal decrypt failed"); }
     }
-    if (message.type === "error") toast(message.message || "Realtime command failed.");
+    if (message.type === "error") { state.pendingTableAction = null; render(); toast(message.message || "Realtime command failed."); }
   });
   socket.addEventListener("close", (event) => {
     if (state.socket !== socket) return;
@@ -698,8 +760,49 @@ function canonicalJson(value) { if (Array.isArray(value)) return `[${value.map(c
 async function completeHoleKeyExchange(serverPublicKey, holeKey) { const serverKey = await crypto.subtle.importKey("raw", base64UrlToBytes(serverPublicKey), { name: "X25519" }, false, []); const shared = await crypto.subtle.deriveBits({ name: "X25519", public: serverKey }, holeKey.pair.privateKey, 256); const hkdfKey = await crypto.subtle.importKey("raw", shared, "HKDF", false, ["deriveKey"]); const salt = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(`xpoker-hole-cards/v1:${holeKey.wallet}`)); holeKey.aesKey = await crypto.subtle.deriveKey({ name: "HKDF", hash: "SHA-256", salt, info: new TextEncoder().encode("xpoker-hole-cards/v1") }, hkdfKey, { name: "AES-GCM", length: 256 }, false, ["decrypt"]); }
 async function decryptHoleCards(envelope, holeKey = state.holeKey) { if (!holeKey?.aesKey) throw new Error("Private-card key is unavailable"); const { iv, ciphertext, tag, ...aad } = envelope; const cipher = base64UrlToBytes(ciphertext); const authTag = base64UrlToBytes(tag); const combined = new Uint8Array(cipher.length + authTag.length); combined.set(cipher); combined.set(authTag, cipher.length); const plaintext = await crypto.subtle.decrypt({ name: "AES-GCM", iv: base64UrlToBytes(iv), additionalData: new TextEncoder().encode(canonicalJson(aad)), tagLength: 128 }, holeKey.aesKey, combined); return JSON.parse(new TextDecoder().decode(plaintext)); }
 
-function tableAction(type) { const hand = state.tableState?.currentHand; if (!hand?.legalActions) return; const action = { type }; if (type === "raise" || type === "bet") action.to = document.querySelector("#bet-range").value; sendRealtime({ type: "command", command: "act", requestId: requestId("act"), tableId: state.tableId, expectedVersion: state.tableState.version, expectedBettingVersion: hand.betting.version, idempotencyKey: requestId("idem"), action }); }
-async function completeTableLeave() { state.leaveRequestId = null; state.socket?.close(1000, "left table"); state.tableId = null; state.tableState = null; state.holeKey = null; clearHoleCards(); state.tableVisual = { handId: null, boardCount: 0, holeCount: 0, potAtomic: 0 }; state.lastEvent = null; state.view = "lobby"; await loadLobby({ quiet: true }); toast("Demo seat released. No funds moved."); }
+function playTableActionMotion(type, amountAtomic = 0) {
+  const seat = document.querySelector(".table-page .seat.is-self");
+  const pot = document.querySelector(".table-page .pot-center");
+  if (!seat || !pot) return;
+  const labels = { fold: "FOLD", check: "CHECK", call: "CALL", bet: "BET", raise: "RAISE" };
+  const cue = document.createElement("span");
+  cue.className = `seat-action local-action action-${type}`;
+  cue.textContent = labels[type] || type.toUpperCase();
+  seat.appendChild(cue);
+  cue.addEventListener("animationend", () => cue.remove(), { once: true });
+  if (!amountAtomic || ["check", "fold"].includes(type)) return;
+  const source = seat.querySelector(".player-avatar")?.getBoundingClientRect() || seat.getBoundingClientRect();
+  const target = pot.getBoundingClientRect();
+  const flight = document.createElement("span");
+  flight.className = "action-chip-flight";
+  flight.innerHTML = chipStackHtml();
+  flight.style.left = `${source.left + source.width / 2}px`;
+  flight.style.top = `${source.top + source.height / 2}px`;
+  document.body.appendChild(flight);
+  const finishX = source.left + source.width / 2 + (target.left + target.width / 2 - source.left - source.width / 2) * 0.55;
+  const finishY = source.top + source.height / 2 + (target.top + target.height / 2 - source.top - source.height / 2) * 0.55;
+  if (matchMedia("(prefers-reduced-motion: reduce)").matches || !flight.animate) { flight.remove(); return; }
+  flight.animate([
+    { opacity: 0, transform: "translate(-50%, -50%) scale(.6)" },
+    { opacity: 1, offset: .18, transform: "translate(-50%, -70%) scale(1.05)" },
+    { opacity: 1, transform: `translate(calc(-50% + ${finishX - source.left - source.width / 2}px), calc(-50% + ${finishY - source.top - source.height / 2}px)) scale(.92)` },
+  ], { duration: 520, easing: "cubic-bezier(.2,.82,.25,1)", fill: "forwards" }).finished.finally(() => flight.remove());
+}
+
+function tableAction(type) {
+  const hand = state.tableState?.currentHand;
+  if (!hand?.legalActions || state.pendingTableAction) return;
+  const action = { type };
+  if (type === "raise" || type === "bet") action.to = document.querySelector("#bet-range").value;
+  const amountAtomic = type === "call" ? Number(hand.legalActions.callAmount || 0) : Number(action.to || 0);
+  const request = { type: "command", command: "act", requestId: requestId("act"), tableId: state.tableId, expectedVersion: state.tableState.version, expectedBettingVersion: hand.betting.version, idempotencyKey: requestId("idem"), action };
+  if (!sendRealtime(request)) return;
+  state.pendingTableAction = { requestId: request.requestId, type };
+  document.querySelectorAll(".action-ready button").forEach((button) => { button.disabled = true; });
+  document.querySelector(".action-ready")?.classList.add("is-committing");
+  playTableActionMotion(type, amountAtomic);
+}
+async function completeTableLeave() { state.leaveRequestId = null; state.socket?.close(1000, "left table"); state.tableId = null; state.tableState = null; state.holeKey = null; clearHoleCards(); clearHandPresentation(); state.pendingTableAction = null; state.tableVisual = { handId: null, boardCount: 0, holeCount: 0, potAtomic: 0, phase: null }; state.lastEvent = null; state.view = "lobby"; await loadLobby({ quiet: true }); toast("Demo seat released. No funds moved."); }
 function leaveTable() {
   if (!state.tableId || state.tableId === "interface-preview" || state.tableConnection !== "live") { completeTableLeave(); return; }
   if (state.leaveRequestId) return;
@@ -735,6 +838,13 @@ function bindEvents(root = document) {
   });
   root.querySelector("#buyin-range")?.addEventListener("input", (event) => { state.buyInAmount = Number(event.target.value); document.querySelector("#buyin-dollar").textContent = money(state.buyInAmount); });
   root.querySelector("#bet-range")?.addEventListener("input", (event) => { document.querySelector("#raise-value").textContent = moneyAtomic(event.target.value); });
+  root.querySelectorAll(".pot-number[data-pot-from][data-pot-to]").forEach((element) => {
+    const from = Number(element.dataset.potFrom || 0); const to = Number(element.dataset.potTo || 0);
+    if (from === to || matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+    const startedAt = performance.now(); const duration = 520;
+    const tick = (now) => { const progress = Math.min(1, (now - startedAt) / duration); const eased = 1 - (1 - progress) ** 3; element.textContent = moneyAtomic(Math.round(from + (to - from) * eased)); if (progress < 1 && element.isConnected) requestAnimationFrame(tick); };
+    requestAnimationFrame(tick);
+  });
 }
 
 function handleAction(event) {
