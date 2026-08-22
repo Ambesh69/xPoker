@@ -71,7 +71,7 @@ const state = {
   assets: FALLBACK_ASSETS, rooms: FALLBACK_ROOMS, profile: null, token: sessionStorage.getItem(SESSION_KEY),
   selectedRoom: FALLBACK_ROOMS[0], selectedAsset: FALLBACK_ASSETS[0], buyInAmount: 20, hostGame: "NLH",
   tableId: null, tableState: null, tableConnection: "offline", socket: null, reconnectTimer: null,
-  reconnectAttempt: 0, holeKey: null, holeCards: [], lastEvent: null, pendingAfterConnect: null, audit: null,
+  reconnectAttempt: 0, holeKey: null, holeHandId: null, holeCards: [], holeDeliverySequence: 0, lastEvent: null, pendingAfterConnect: null, audit: null,
   tableVisual: { handId: null, boardCount: 0, holeCount: 0, potAtomic: 0 },
   leaveRequestId: null,
   handHistory: [], operations: null, operationsPlayers: [], operationsReports: [], operationsInvites: [],
@@ -407,16 +407,16 @@ function buyStocksModal(asset = state.selectedAsset) { state.selectedAsset = ass
 async function takeSeat() {
   if (!state.profile) { closeModal(); walletModal("buyin"); return; }
   const button = document.querySelector('[data-action="take-seat"]'); button.disabled = true; button.textContent = "Seating…";
-  if (state.backend !== "online") { closeModal(); state.tableId = "interface-preview"; state.tableVisual = { handId: null, boardCount: 0, holeCount: 0, potAtomic: 0 }; state.tableState = previewTableState(); state.view = "table"; state.tableConnection = "preview"; render(); toast("Interface seat created locally. There is no multiplayer server on this deployment."); return; }
-  try { const result = await api("/v1/beta/tables/join", { method: "POST", authenticated: true, body: { roomId: state.selectedRoom.id, assetSymbol: state.selectedAsset.symbol, buyInAtomic: String(Math.round(state.buyInAmount * 100)) } }); closeModal(); state.tableId = result.tableId; state.tableVisual = { handId: null, boardCount: 0, holeCount: 0, potAtomic: 0 }; state.tableState = result.state; state.view = "table"; state.holeCards = []; render(); connectRealtime(); toast(`${money(state.buyInAmount)} in demo credits seated. No funds moved.`); }
+  if (state.backend !== "online") { closeModal(); state.tableId = "interface-preview"; state.tableVisual = { handId: null, boardCount: 0, holeCount: 0, potAtomic: 0 }; clearHoleCards(); state.tableState = previewTableState(); state.view = "table"; state.tableConnection = "preview"; render(); toast("Interface seat created locally. There is no multiplayer server on this deployment."); return; }
+  try { const result = await api("/v1/beta/tables/join", { method: "POST", authenticated: true, body: { roomId: state.selectedRoom.id, assetSymbol: state.selectedAsset.symbol, buyInAtomic: String(Math.round(state.buyInAmount * 100)) } }); closeModal(); state.tableId = result.tableId; state.tableVisual = { handId: null, boardCount: 0, holeCount: 0, potAtomic: 0 }; state.tableState = result.state; state.view = "table"; clearHoleCards(); render(); connectRealtime(); toast(`${money(state.buyInAmount)} in demo credits seated. No funds moved.`); }
   catch (error) { button.disabled = false; button.textContent = "Take demo seat"; toast(error.message); }
 }
 
 function previewTableState() { return { version: 1, status: "WAITING", tableId: "interface-preview", rules: state.selectedRoom.rules, seats: [{ playerId: state.profile?.wallet || "PreviewPlayer", seat: 3, stackAtomic: String(state.buyInAmount * 100), status: "SEATED", timeBankMs: 60_000 }], handNumber: 0, buttonSeat: null, currentHand: null, lastResult: null }; }
+function clearHoleCards() { state.holeHandId = null; state.holeCards = []; }
 function adoptTableState(nextState) {
-  const previousHandId = state.tableState?.currentHand?.handId || null;
   const nextHandId = nextState?.currentHand?.handId || null;
-  if (previousHandId !== nextHandId) state.holeCards = [];
+  if (state.holeHandId !== nextHandId) clearHoleCards();
   state.tableState = nextState;
 }
 
@@ -487,12 +487,14 @@ function tableSeat({ actualSeat, displayIndex, x, y }, visual) {
   const initials = isSelf ? "YOU" : shortWallet(player.playerId).slice(0, 2).toUpperCase();
   const expectedCards = hand?.game === "PLO4" ? 4 : 2;
   const inHand = Boolean(handPlayer);
-  const shownCards = isSelf && state.holeCards.length ? state.holeCards.map((reveal) => reveal.card.code) : Array.from({ length: inHand ? expectedCards : 0 }, () => "?");
-  const cards = shownCards.length ? `<span class="hole-cards ${isSelf ? "hero-cards" : "opponent-cards"}">${shownCards.map((code, index) => {
+  const privateDealReady = Boolean(isSelf && inHand && state.holeHandId === hand?.handId && state.holeCards.length === expectedCards);
+  const privateDealPending = Boolean(isSelf && inHand && !privateDealReady);
+  const shownCards = privateDealReady ? state.holeCards.map((reveal) => reveal.card.code) : Array.from({ length: inHand ? expectedCards : 0 }, () => "?");
+  const cards = shownCards.length ? `<span class="hole-cards ${isSelf ? "hero-cards" : "opponent-cards"} cards-${shownCards.length} ${privateDealPending ? "private-deal-pending" : ""}">${shownCards.map((code, index) => {
     const fan = (index - (shownCards.length - 1) / 2) * (isSelf ? 4.5 : 3);
-    const shouldAnimate = isSelf && code !== "?" ? index >= visual.holeStart : visual.handChanged;
+    const shouldAnimate = privateDealReady ? index >= visual.holeStart : visual.handChanged;
     return cardHtml(code, { extra: isSelf ? "private-card" : "opponent-card", index, animate: shouldAnimate, style: `--card-rotate:${fan}deg;` });
-  }).join("")}</span>` : "";
+  }).join("")}</span>${privateDealPending ? '<span class="private-deal-status"><i></i>Securing your cards…</span>' : ""}` : "";
   const avatarColor = isSelf ? "#d8ff73" : ["#f5bd66", "#7cc8b3", "#ef8d79", "#83a8ff", "#c39aef", "#e5d27c"][displayIndex % 6];
   const flags = [handPlayer?.folded ? "folded" : "", handPlayer?.allIn ? "all-in" : "", player.status === "SITTING_OUT" ? "sitting-out" : ""].filter(Boolean).join(" ");
   return `<div class="seat zone-${zone} ${isSelf ? "is-self" : ""} ${active ? "active" : ""} ${flags}" style="${seatStyle}">${cards}<span class="player-avatar" style="--avatar-color:${avatarColor}"><span class="avatar-initials">${initials}</span>${active ? '<svg class="turn-ring" viewBox="0 0 64 64" aria-hidden="true"><circle cx="32" cy="32" r="29" pathLength="100" /></svg>' : ""}${table.buttonSeat === player.seat ? '<span class="dealer-chip">D</span>' : ""}</span><span class="player-identity"><span class="player-name">${escapeHtml(seatName(player))}${isSelf ? '<small>YOU</small>' : ""}</span><span class="player-stack">${moneyAtomic(handPlayer?.stack ?? player.stackAtomic)} <b>${escapeHtml(state.selectedAsset.symbol)}</b></span></span>${handPlayer?.allIn ? '<span class="seat-state">ALL IN</span>' : ""}${handPlayer && handPlayer.streetContribution !== "0" ? `<span class="seat-bet"><i></i>${moneyAtomic(handPlayer.streetContribution)}</span>` : ""}</div>`;
@@ -621,6 +623,7 @@ function connectRealtime() {
   socket.addEventListener("open", () => { state.tableConnection = "authenticating"; sendRealtime({ type: "authenticate", requestId: requestId("auth"), token: state.token }); render(); });
   socket.addEventListener("message", async (event) => {
     let message; try { message = JSON.parse(event.data); } catch { return; }
+    if (state.socket !== socket) return;
     if (message.type === "authenticated") { state.tableConnection = "live"; state.reconnectAttempt = 0; state.reconnectReason = null; state.reconnectNextAt = null; state.lastConnectedAt = new Date().toISOString(); sendRealtime({ type: "subscribe", requestId: requestId("sub"), tableId: state.tableId, afterVersion: state.tableState?.version || 0 }); await beginHoleKeyExchange(); render(); }
     if (message.type === "table_snapshot") { adoptTableState(message.state); render(); }
     if (message.type === "command_result") {
@@ -629,8 +632,26 @@ function connectRealtime() {
       render();
     }
     if (message.type === "table_event") { state.lastEvent = message.event; sendRealtime({ type: "subscribe", requestId: requestId("sync"), tableId: state.tableId, afterVersion: state.tableState?.version || 0 }); }
-    if (message.type === "hole_card_key_established") await completeHoleKeyExchange(message.serverPublicKey);
-    if (message.type === "hole_cards") { try { const payload = await decryptHoleCards(message.envelope); state.holeCards = payload.reveals; render(); } catch { toast("Private cards could not be decrypted. Reconnecting safely."); socket.close(4400, "private deal decrypt failed"); } }
+    if (message.type === "hole_card_key_established") {
+      const holeKey = state.holeKey;
+      if (holeKey) {
+        holeKey.ready = completeHoleKeyExchange(message.serverPublicKey, holeKey);
+        try { await holeKey.ready; } catch { if (state.socket === socket) socket.close(4400, "private deal key failed"); }
+      }
+    }
+    if (message.type === "hole_cards") {
+      const deliverySequence = ++state.holeDeliverySequence;
+      try {
+        const holeKey = state.holeKey;
+        if (holeKey?.ready) await holeKey.ready;
+        const payload = await decryptHoleCards(message.envelope, holeKey);
+        if (!payload?.handId || payload.handId !== message.handId || !Array.isArray(payload.reveals)) throw new Error("Private-card hand identity is invalid");
+        if (state.socket !== socket || deliverySequence !== state.holeDeliverySequence) return;
+        state.holeHandId = payload.handId;
+        state.holeCards = payload.reveals;
+        render();
+      } catch { if (state.socket !== socket) return; toast("Private cards could not be decrypted. Reconnecting safely."); socket.close(4400, "private deal decrypt failed"); }
+    }
     if (message.type === "error") toast(message.message || "Realtime command failed.");
   });
   socket.addEventListener("close", (event) => {
@@ -668,17 +689,17 @@ function retryRealtime() { if (!state.networkOnline) return; clearTimeout(state.
 
 async function beginHoleKeyExchange() {
   if (!crypto.subtle || !state.profile) return;
-  try { const pair = await crypto.subtle.generateKey({ name: "X25519" }, true, ["deriveBits"]); const rawPublic = new Uint8Array(await crypto.subtle.exportKey("raw", pair.publicKey)); state.holeKey = { pair, aesKey: null }; sendRealtime({ type: "key_exchange", requestId: requestId("key"), clientPublicKey: bytesToBase64Url(rawPublic) }); }
+  try { const pair = await crypto.subtle.generateKey({ name: "X25519" }, true, ["deriveBits"]); const rawPublic = new Uint8Array(await crypto.subtle.exportKey("raw", pair.publicKey)); state.holeKey = { pair, aesKey: null, ready: null, wallet: state.profile.wallet }; sendRealtime({ type: "key_exchange", requestId: requestId("key"), clientPublicKey: bytesToBase64Url(rawPublic) }); }
   catch { toast("This browser cannot open encrypted private cards (X25519 unavailable). Public play state remains connected."); }
 }
 
 function base64UrlToBytes(value) { const base64 = value.replace(/-/g, "+").replace(/_/g, "/") + "===".slice((value.length + 3) % 4); const binary = atob(base64); return Uint8Array.from(binary, (character) => character.charCodeAt(0)); }
 function canonicalJson(value) { if (Array.isArray(value)) return `[${value.map(canonicalJson).join(",")}]`; if (value && typeof value === "object") return `{${Object.keys(value).sort().map((key) => `${JSON.stringify(key)}:${canonicalJson(value[key])}`).join(",")}}`; return JSON.stringify(value); }
-async function completeHoleKeyExchange(serverPublicKey) { const serverKey = await crypto.subtle.importKey("raw", base64UrlToBytes(serverPublicKey), { name: "X25519" }, false, []); const shared = await crypto.subtle.deriveBits({ name: "X25519", public: serverKey }, state.holeKey.pair.privateKey, 256); const hkdfKey = await crypto.subtle.importKey("raw", shared, "HKDF", false, ["deriveKey"]); const salt = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(`xpoker-hole-cards/v1:${state.profile.wallet}`)); state.holeKey.aesKey = await crypto.subtle.deriveKey({ name: "HKDF", hash: "SHA-256", salt, info: new TextEncoder().encode("xpoker-hole-cards/v1") }, hkdfKey, { name: "AES-GCM", length: 256 }, false, ["decrypt"]); }
-async function decryptHoleCards(envelope) { if (!state.holeKey?.aesKey) throw new Error("Private-card key is unavailable"); const { iv, ciphertext, tag, ...aad } = envelope; const cipher = base64UrlToBytes(ciphertext); const authTag = base64UrlToBytes(tag); const combined = new Uint8Array(cipher.length + authTag.length); combined.set(cipher); combined.set(authTag, cipher.length); const plaintext = await crypto.subtle.decrypt({ name: "AES-GCM", iv: base64UrlToBytes(iv), additionalData: new TextEncoder().encode(canonicalJson(aad)), tagLength: 128 }, state.holeKey.aesKey, combined); return JSON.parse(new TextDecoder().decode(plaintext)); }
+async function completeHoleKeyExchange(serverPublicKey, holeKey) { const serverKey = await crypto.subtle.importKey("raw", base64UrlToBytes(serverPublicKey), { name: "X25519" }, false, []); const shared = await crypto.subtle.deriveBits({ name: "X25519", public: serverKey }, holeKey.pair.privateKey, 256); const hkdfKey = await crypto.subtle.importKey("raw", shared, "HKDF", false, ["deriveKey"]); const salt = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(`xpoker-hole-cards/v1:${holeKey.wallet}`)); holeKey.aesKey = await crypto.subtle.deriveKey({ name: "HKDF", hash: "SHA-256", salt, info: new TextEncoder().encode("xpoker-hole-cards/v1") }, hkdfKey, { name: "AES-GCM", length: 256 }, false, ["decrypt"]); }
+async function decryptHoleCards(envelope, holeKey = state.holeKey) { if (!holeKey?.aesKey) throw new Error("Private-card key is unavailable"); const { iv, ciphertext, tag, ...aad } = envelope; const cipher = base64UrlToBytes(ciphertext); const authTag = base64UrlToBytes(tag); const combined = new Uint8Array(cipher.length + authTag.length); combined.set(cipher); combined.set(authTag, cipher.length); const plaintext = await crypto.subtle.decrypt({ name: "AES-GCM", iv: base64UrlToBytes(iv), additionalData: new TextEncoder().encode(canonicalJson(aad)), tagLength: 128 }, holeKey.aesKey, combined); return JSON.parse(new TextDecoder().decode(plaintext)); }
 
 function tableAction(type) { const hand = state.tableState?.currentHand; if (!hand?.legalActions) return; const action = { type }; if (type === "raise" || type === "bet") action.to = document.querySelector("#bet-range").value; sendRealtime({ type: "command", command: "act", requestId: requestId("act"), tableId: state.tableId, expectedVersion: state.tableState.version, expectedBettingVersion: hand.betting.version, idempotencyKey: requestId("idem"), action }); }
-async function completeTableLeave() { state.leaveRequestId = null; state.socket?.close(1000, "left table"); state.tableId = null; state.tableState = null; state.holeCards = []; state.tableVisual = { handId: null, boardCount: 0, holeCount: 0, potAtomic: 0 }; state.lastEvent = null; state.view = "lobby"; await loadLobby({ quiet: true }); toast("Demo seat released. No funds moved."); }
+async function completeTableLeave() { state.leaveRequestId = null; state.socket?.close(1000, "left table"); state.tableId = null; state.tableState = null; state.holeKey = null; clearHoleCards(); state.tableVisual = { handId: null, boardCount: 0, holeCount: 0, potAtomic: 0 }; state.lastEvent = null; state.view = "lobby"; await loadLobby({ quiet: true }); toast("Demo seat released. No funds moved."); }
 function leaveTable() {
   if (!state.tableId || state.tableId === "interface-preview" || state.tableConnection !== "live") { completeTableLeave(); return; }
   if (state.leaveRequestId) return;

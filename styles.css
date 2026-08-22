@@ -4731,3 +4731,167 @@ a:focus-visible {
     animation: none !important;
   }
 }
+
+/* Live-table legibility pass --------------------------------------------- */
+.table-page { --table-muted: #b7c5bd; font-weight: 560; }
+.table-page .table-title h1 { font-size: clamp(24px, 1.9vw, 31px); font-weight: 760; }
+.table-page .table-title .table-kicker { font-size: 10px; font-weight: 650; }
+.table-page .table-meta .tag { min-height: 48px; padding: 7px 14px; font-size: 12px; font-weight: 680; }
+.table-page .table-meta .tag small { font-size: 8px; font-weight: 650; }
+.table-page .status-pill { min-height: 48px; font-size: 10px; font-weight: 700; }
+.table-page .table-toast { gap: 10px; padding: 10px 15px; color: #dae5de; font-size: 11px; font-weight: 600; }
+.table-page .table-toast > span { width: 9px; height: 9px; }
+.table-page .pot-center { top: 27%; }
+.table-page .street-label { font-size: 10px; font-weight: 650; }
+.table-page .pot-center > .utility-label { color: #c2d0c8; font-size: 9px; font-weight: 650; }
+.table-page .pot-center > strong { font-size: clamp(30px, 2.6vw, 42px); font-weight: 720; }
+.table-page .pot-center > strong small { font-size: 12px; font-weight: 700; }
+
+.table-page .hero-cards {
+  bottom: 52px;
+  z-index: 10;
+  filter: drop-shadow(0 18px 24px rgba(0, 0, 0, 0.34));
+}
+
+.table-page .hero-cards .card {
+  width: clamp(90px, 4.9vw, 108px);
+  height: clamp(128px, 6.9vw, 154px);
+  border: 2px solid rgba(211, 204, 184, 0.92);
+  border-radius: 13px;
+  color: #07140e;
+  background: radial-gradient(circle at 24% 14%, #fff 0 22%, transparent 51%), linear-gradient(150deg, #fffefa, #f1ede1);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.96), 0 16px 32px rgba(0, 0, 0, 0.42), 0 3px 8px rgba(0, 0, 0, 0.3);
+}
+
+.table-page .hero-cards.cards-2 .card + .card { margin-left: -9px; }
+.table-page .hero-cards.cards-4 .card + .card { margin-left: -23px; }
+.table-page .hero-cards .card.red { color: #d7373f; }
+.table-page .hero-cards .card-corner-bottom { display: none; }
+.table-page .hero-cards .card-corner-top { top: 11px; left: 12px; justify-items: start; }
+
+.table-page .hero-cards .card-corner b {
+  font-size: clamp(32px, 2vw, 41px);
+  font-weight: 820;
+  font-variation-settings: "wdth" 78, "wght" 820;
+  line-height: 0.8;
+  letter-spacing: -0.06em;
+  text-shadow: 0 1px 0 rgba(255, 255, 255, 0.7);
+}
+
+.table-page .hero-cards .card-corner i { margin-top: 9px; font-size: clamp(24px, 1.5vw, 31px); line-height: 0.75; }
+.table-page .hero-cards .card-suit { top: auto; right: 10px; bottom: 8px; left: auto; opacity: 0.96; font-size: clamp(48px, 3.2vw, 68px); line-height: 0.8; transform: none; }
+.table-page .hero-cards .card-back-mark { width: 44px; height: 44px; font-size: 11px; }
+.table-page .seat.is-self:has(.hero-cards) .player-avatar { opacity: 0.28; transform: translateY(4px) scale(0.92); }
+.table-page .private-deal-pending { opacity: 0.86; }
+
+.table-page .private-deal-status {
+  position: absolute;
+  bottom: 66px;
+  left: 50%;
+  z-index: 12;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 6px 10px;
+  border: 1px solid rgba(235, 216, 145, 0.26);
+  border-radius: 999px;
+  color: #eef5ef;
+  background: rgba(5, 19, 14, 0.92);
+  box-shadow: 0 8px 22px rgba(0, 0, 0, 0.3);
+  font-family: var(--mono);
+  font-size: 9px;
+  font-weight: 650;
+  white-space: nowrap;
+  transform: translateX(-50%);
+}
+
+.table-page .private-deal-status i { width: 8px; height: 8px; border: 2px solid var(--table-live); border-top-color: transparent; border-radius: 50%; animation: reconnect-spin 0.9s linear infinite; }
+.table-page .player-identity { min-width: 142px; padding: 9px 14px 10px; }
+.table-page .player-name { max-width: 158px; font-size: 15px; font-weight: 760; }
+.table-page .player-name small { font-size: 7px; font-weight: 750; }
+.table-page .player-stack { color: #d0dcd5; font-size: 11px; font-weight: 600; }
+.table-page .player-stack b { font-size: 9px; font-weight: 650; }
+.table-page .seat-bet { font-size: 10px; font-weight: 720; }
+.table-page .empty-seat .player-name { color: #c8d4cd; font-size: 11px; font-weight: 650; }
+.table-page .fairness-rail { width: 258px; }
+.table-page .fairness-title strong { font-size: 13px; font-weight: 760; }
+.table-page .fairness-title small,
+.table-page .fairness-facts small { font-size: 8px; font-weight: 650; }
+.table-page .fairness-facts > span { padding: 9px 0; grid-template-columns: 78px minmax(0, 1fr); }
+.table-page .fairness-facts strong { font-size: 9px; font-weight: 650; }
+.table-page .fairness-seal,
+.table-page .fairness-rail .audit-link { min-height: 42px; font-size: 9px; font-weight: 650; }
+.table-page .action-dock .fold-action small,
+.table-page .action-dock .primary-action small { font-size: 8px; font-weight: 700; }
+.table-page .action-dock .fold-action strong,
+.table-page .action-dock .primary-action strong { font-size: 18px; font-weight: 760; }
+.table-page .bet-control span { font-size: 9px; font-weight: 650; }
+.table-page .bet-control strong { font-size: 16px; font-weight: 740; }
+.table-page .range-submit { font-size: 10px; font-weight: 720; }
+.table-page .waiting-dock strong { font-size: 16px; font-weight: 740; }
+.table-page .waiting-dock small { color: #b7c5bd; font-size: 11px; font-weight: 540; }
+
+@media (max-width: 1350px) {
+  .table-page .fairness-rail { width: 224px; }
+}
+
+@media (min-width: 981px) {
+  .table-page .table-toast { left: 18px; transform: none; }
+  .table-page .seat.zone-top { transform: translate(-50%, calc(-50% - 38px)); }
+  .table-page .seat.zone-top.empty-seat:hover { transform: translate(-50%, calc(-50% - 38px)) scale(1.04); }
+}
+
+@media (max-width: 980px) {
+  .table-page .pot-center { top: 37%; }
+  .table-page .hero-cards .card { width: 78px; height: 112px; }
+  .table-page .hero-cards.cards-4 .card + .card { margin-left: -20px; }
+  .table-page .hero-cards .card-corner b { font-size: 28px; }
+  .table-page .hero-cards .card-corner i { font-size: 21px; }
+  .table-page .hero-cards .card-suit { font-size: 44px; }
+  .table-page .private-deal-status { bottom: 62px; }
+  .table-page .player-identity { min-width: 124px; padding: 8px 10px 9px; }
+  .table-page .player-name { max-width: 132px; font-size: 13px; }
+}
+
+@media (max-width: 680px) {
+  .table-page .table-title h1 { font-size: 20px; }
+  .table-page .table-title .table-kicker { font-size: 8px; }
+  .table-page .status-pill { min-height: 39px; font-size: 8px; }
+  .table-page .pot-center { top: 40%; }
+  .table-page .street-label { font-size: 8px; }
+  .table-page .pot-center > .utility-label { font-size: 8px; }
+  .table-page .pot-center > strong { font-size: 22px; }
+  .table-page .pot-center > strong small { font-size: 9px; }
+  .table-page .hero-cards { bottom: 44px; }
+  .table-page .hero-cards .card { width: 61px; height: 88px; border-radius: 9px; }
+  .table-page .hero-cards.cards-2 .card + .card { margin-left: -7px; }
+  .table-page .hero-cards.cards-4 .card + .card { margin-left: -15px; }
+  .table-page .hero-cards .card-corner-top { top: 7px; left: 8px; }
+  .table-page .hero-cards .card-corner b { font-size: 23px; }
+  .table-page .hero-cards .card-corner i { margin-top: 5px; font-size: 17px; }
+  .table-page .hero-cards .card-suit { right: 7px; bottom: 6px; font-size: 34px; }
+  .table-page .hero-cards .card-back-mark { width: 30px; height: 30px; font-size: 8px; }
+  .table-page .private-deal-status { bottom: 52px; padding: 5px 8px; font-size: 8px; }
+  .table-page .player-identity { min-width: 98px; padding: 6px 8px 7px; }
+  .table-page .player-name { max-width: 104px; font-size: 11px; }
+  .table-page .player-stack { font-size: 9px; }
+  .table-page .empty-seat .player-name { font-size: 9px; }
+  .table-page .seat-bet { font-size: 8px; }
+  .table-page .table-toast { max-width: calc(100% - 176px); font-size: 8px; }
+  .table-page .fairness-title strong { font-size: 10px; }
+  .table-page .fairness-title small { font-size: 7px; }
+  .table-page .fairness-rail .audit-link { font-size: 8px; }
+  .table-page .action-dock .fold-action small,
+  .table-page .action-dock .primary-action small { font-size: 7px; }
+  .table-page .action-dock .fold-action strong,
+  .table-page .action-dock .primary-action strong { font-size: 16px; }
+  .table-page .bet-control span { font-size: 8px; }
+  .table-page .bet-control strong { font-size: 14px; }
+  .table-page .range-submit { font-size: 9px; }
+  .table-page .waiting-dock strong { font-size: 12px; }
+  .table-page .waiting-dock .btn { font-size: 9px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .table-page .private-deal-status i { animation: none; }
+}
