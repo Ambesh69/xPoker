@@ -5802,10 +5802,10 @@ a:focus-visible {
   font-family: var(--display);
 }
 
-.table-page .card.suit-spades { --card-ink: #111715; }
-.table-page .card.suit-hearts { --card-ink: #e52f2b; }
-.table-page .card.suit-diamonds { --card-ink: #3267cf; }
-.table-page .card.suit-clubs { --card-ink: #35a447; }
+.table-page .card.face-up.suit-spades { --card-ink: #111715; }
+.table-page .card.face-up.suit-hearts { --card-ink: #e52f2b; }
+.table-page .card.face-up.suit-diamonds { --card-ink: #3267cf; }
+.table-page .card.face-up.suit-clubs { --card-ink: #35a447; }
 
 .table-page .card-face {
   position: absolute;
