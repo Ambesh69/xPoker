@@ -18,6 +18,7 @@
   --shadow: 0 24px 70px rgba(25, 53, 38, 0.1);
   --display: "Bricolage Grotesque", "Arial Narrow", sans-serif;
   --mono: "IBM Plex Mono", ui-monospace, monospace;
+  --card-rank: "Roboto Condensed", "Arial Narrow", Arial, Helvetica, sans-serif;
 }
 
 * {
@@ -5818,15 +5819,17 @@ a:focus-visible {
 
 .table-page .card-face b {
   justify-self: start;
-  font-family: "Arial Rounded MT Bold", "Arial Black", Arial, Helvetica, sans-serif;
+  font-family: var(--card-rank);
   font-size: 32px;
   font-variation-settings: normal;
   font-weight: 900;
-  letter-spacing: -.025em;
-  line-height: .78;
+  font-variant-numeric: lining-nums tabular-nums;
+  letter-spacing: -.035em;
+  line-height: .8;
+  text-rendering: geometricPrecision;
 }
 
-.table-page .card.rank-t .card-face b { font-size: 25px; letter-spacing: 0; }
+.table-page .card.rank-t .card-face b { font-size: 27px; letter-spacing: -.07em; }
 
 .table-page .card-face i {
   align-self: end;
@@ -5854,7 +5857,7 @@ a:focus-visible {
 }
 
 .table-page .community-card .card-face b { font-size: 32px; }
-.table-page .community-card.rank-t .card-face b { font-size: 25px; }
+.table-page .community-card.rank-t .card-face b { font-size: 27px; }
 .table-page .community-card .card-face i { font-size: 42px; }
 
 .table-page .hero-cards {
