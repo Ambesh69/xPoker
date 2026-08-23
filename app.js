@@ -455,6 +455,18 @@ function tableVisualTransition(hand, boardCount, holeCount, potAtomic) {
 function seatName(player) { return player.playerId === state.profile?.wallet ? state.profile.displayName : shortWallet(player.playerId); }
 const CARD_NAMES = Object.freeze({ A: "Ace", K: "King", Q: "Queen", J: "Jack", T: "Ten", 9: "Nine", 8: "Eight", 7: "Seven", 6: "Six", 5: "Five", 4: "Four", 3: "Three", 2: "Two" });
 const SUIT_NAMES = Object.freeze({ "♣": "clubs", "♦": "diamonds", "♥": "hearts", "♠": "spades" });
+const PIP_LAYOUTS = Object.freeze({
+  A: [[50, 50]],
+  2: [[50, 23], [50, 77, 1]],
+  3: [[50, 20], [50, 50], [50, 80, 1]],
+  4: [[29, 23], [71, 23], [29, 77, 1], [71, 77, 1]],
+  5: [[29, 21], [71, 21], [50, 50], [29, 79, 1], [71, 79, 1]],
+  6: [[29, 19], [71, 19], [29, 50], [71, 50], [29, 81, 1], [71, 81, 1]],
+  7: [[29, 17], [71, 17], [50, 35], [29, 50], [71, 50], [29, 83, 1], [71, 83, 1]],
+  8: [[29, 16], [71, 16], [50, 34], [29, 50], [71, 50], [50, 66, 1], [29, 84, 1], [71, 84, 1]],
+  9: [[29, 15], [71, 15], [29, 38], [71, 38], [50, 50], [29, 62, 1], [71, 62, 1], [29, 85, 1], [71, 85, 1]],
+  T: [[29, 13], [71, 13], [29, 32], [71, 32], [29, 50], [71, 50], [29, 68, 1], [71, 68, 1], [29, 87, 1], [71, 87, 1]],
+});
 const TABLE_SEAT_LAYOUTS = Object.freeze({
   2: [[50, 77], [50, 7]],
   3: [[50, 77], [88, 26], [12, 26]],
@@ -472,10 +484,17 @@ function cardHtml(code, { extra = "", index = 0, animate = false, style = "" } =
   const suit = hidden ? "" : safeCode.slice(-1);
   const rank = hidden ? "" : safeCode.slice(0, -1);
   const red = /[♥♦]/.test(suit) ? "red" : "";
-  const classes = ["card", red, hidden ? "face-down" : "face-up", animate ? "is-dealt" : "", extra].filter(Boolean).join(" ");
+  const suitClass = hidden ? "" : `suit-${SUIT_NAMES[suit] || "unknown"}`;
+  const rankClass = hidden ? "" : `rank-${rank.toLowerCase()}`;
+  const classes = ["card", red, suitClass, rankClass, hidden ? "face-down" : "face-up", animate ? "is-dealt" : "", extra].filter(Boolean).join(" ");
   const label = hidden ? "Face-down card" : `${CARD_NAMES[rank] || rank} of ${SUIT_NAMES[suit] || suit}`;
   if (hidden) return `<span class="${classes}" style="--deal-index:${index};${style}" role="img" aria-label="${label}"><span class="card-back-mark">xP</span></span>`;
-  return `<span class="${classes}" style="--deal-index:${index};${style}" role="img" aria-label="${escapeHtml(label)}"><span class="card-corner card-corner-top"><b>${escapeHtml(rank)}</b><i>${escapeHtml(suit)}</i></span><span class="card-suit">${escapeHtml(suit)}</span><span class="card-corner card-corner-bottom"><b>${escapeHtml(rank)}</b><i>${escapeHtml(suit)}</i></span></span>`;
+  const indexRank = rank === "T" ? "10" : rank;
+  const corner = `<b>${escapeHtml(indexRank)}</b><i>${escapeHtml(suit)}</i>`;
+  const face = ["J", "Q", "K"].includes(rank)
+    ? `<span class="card-court" aria-hidden="true"><span class="court-crest"><i>${escapeHtml(suit)}</i><b>${escapeHtml(rank)}</b><em>${escapeHtml(suit)}</em></span></span>`
+    : `<span class="card-pips ${rank === "A" ? "ace-pips" : ""}" aria-hidden="true">${(PIP_LAYOUTS[rank] || []).map(([x, y, flipped]) => `<i class="card-pip ${flipped ? "is-flipped" : ""}" style="--pip-x:${x}%;--pip-y:${y}%">${escapeHtml(suit)}</i>`).join("")}</span>`;
+  return `<span class="${classes}" style="--deal-index:${index};${style}" role="img" aria-label="${escapeHtml(label)}"><span class="card-corner card-corner-top">${corner}</span>${face}<span class="card-corner card-corner-bottom">${corner}</span></span>`;
 }
 
 function tableSeatLayout(table) {
