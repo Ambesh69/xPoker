@@ -5818,15 +5818,15 @@ a:focus-visible {
 
 .table-page .card-face b {
   justify-self: start;
-  font-family: var(--display);
+  font-family: "Arial Rounded MT Bold", "Arial Black", Arial, Helvetica, sans-serif;
   font-size: 32px;
-  font-variation-settings: "wdth" 82, "wght" 820;
-  font-weight: 820;
-  letter-spacing: -.08em;
+  font-variation-settings: normal;
+  font-weight: 900;
+  letter-spacing: -.025em;
   line-height: .78;
 }
 
-.table-page .card.rank-t .card-face b { font-size: 27px; letter-spacing: -.14em; }
+.table-page .card.rank-t .card-face b { font-size: 25px; letter-spacing: 0; }
 
 .table-page .card-face i {
   align-self: end;
@@ -5854,7 +5854,7 @@ a:focus-visible {
 }
 
 .table-page .community-card .card-face b { font-size: 32px; }
-.table-page .community-card.rank-t .card-face b { font-size: 27px; }
+.table-page .community-card.rank-t .card-face b { font-size: 25px; }
 .table-page .community-card .card-face i { font-size: 42px; }
 
 .table-page .hero-cards {
