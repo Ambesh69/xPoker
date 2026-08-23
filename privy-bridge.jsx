@@ -14,7 +14,7 @@ const walletLabels = Object.freeze({
   phantom: "Phantom",
   solflare: "Solflare",
   backpack: "Backpack",
-  wallet_connect_qr_solana: "WalletConnect",
+  wallet_connect: "WalletConnect",
 });
 
 function openPreselectedWallet(walletId) {
@@ -58,8 +58,15 @@ function preferredSolanaWallet(user, loginAccount, walletClientType) {
 }
 
 function friendlyPrivyError(error) {
-  if (["exited_auth_flow", "exited_connect_wallet_flow", "generic_connect_wallet_error"].includes(error)) return "Wallet sign-in was closed.";
-  if (error === "user_rejected") return "The wallet signature was declined.";
+  const code = typeof error === "string" ? error : error?.code;
+  const detail = [code, error?.message, error?.cause?.message]
+    .filter(Boolean)
+    .join(" ");
+  if (["exited_auth_flow", "exited_connect_wallet_flow", "generic_connect_wallet_error"].includes(code)) return "Wallet sign-in was closed.";
+  if (code === "user_rejected") return "The wallet signature was declined.";
+  if (/namespace|accounts?['\"]?\s+of\s+undefined|unsupported.+solana|solana.+unsupported/i.test(detail)) {
+    return "That wallet does not support Solana sign-in. Choose Phantom, Solflare, Backpack, or another Solana wallet.";
+  }
   return "The Solana wallet could not complete sign-in.";
 }
 
@@ -198,7 +205,7 @@ if (appId && rootElement) {
             "solflare",
             "backpack",
             "detected_solana_wallets",
-            "wallet_connect_qr_solana",
+            "wallet_connect",
           ],
         },
         externalWallets: {

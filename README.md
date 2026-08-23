@@ -74,7 +74,7 @@ The contract checks are `npm run test:contract`, `npm run build:contract`, and `
 
 - Four permanent $20-minimum public tables: NLH, PLO 4, and two round-of-each tables.
 - Private room creation with NLH/PLO 4/ROE, blinds, seats, min/max buy-ins, rake and cap, action clock, time bank, host approvals, queue, straddle, run-it-twice, rabbit hunt, and anonymous seating controls.
-- Wallet connection prototype for Phantom, Backpack, and WalletConnect.
+- Privy wallet login for Phantom, Solflare, Backpack, and a Solana-filtered WalletConnect directory.
 - xStock balance view, asset-based buy-in selection, quantity preview, and table seating.
 - One-screen xStock purchase/RFQ concept with USDC payment.
 - Playable table UI with fold, call, and raise interactions.

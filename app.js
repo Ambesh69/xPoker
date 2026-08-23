@@ -50,7 +50,7 @@ const PRIVY_WALLETS = Object.freeze([
     name: "Backpack",
     icon: "https://explorer-api.walletconnect.com/v3/logo/sm/71ca9daf-a31e-4d2a-fd01-f5dc2dc66900?projectId=34357d3c125c2bcf2ce2bc3309d98715",
   },
-  { id: "wallet_connect_qr_solana", name: "WalletConnect", icon: "walletconnect" },
+  { id: "wallet_connect", name: "More Solana wallets", icon: "walletconnect" },
 ]);
 let privyLoad;
 
@@ -247,7 +247,7 @@ function privyWalletIcon(wallet) {
   return `<svg viewBox="0 0 300 185" aria-hidden="true"><path d="M61.44 36.26c48.91-47.89 128.21-47.89 177.12 0l5.89 5.76a6.04 6.04 0 0 1 0 8.67l-20.14 19.72a6.35 6.35 0 0 1-8.86 0l-8.1-7.93c-34.12-33.41-89.44-33.41-123.56 0l-8.68 8.49a6.35 6.35 0 0 1-8.86 0L46.12 51.25a6.04 6.04 0 0 1 0-8.67l15.32-6.32Zm218.77 40.77 17.92 17.55a6.04 6.04 0 0 1 0 8.67l-80.81 79.12a6.35 6.35 0 0 1-8.86 0l-57.35-56.16a1.59 1.59 0 0 0-2.22 0l-57.35 56.16a6.35 6.35 0 0 1-8.86 0L1.87 103.25a6.04 6.04 0 0 1 0-8.67l17.92-17.55a6.35 6.35 0 0 1 8.86 0l57.35 56.15a1.59 1.59 0 0 0 2.22 0l57.35-56.15a6.35 6.35 0 0 1 8.86 0l57.35 56.15a1.59 1.59 0 0 0 2.22 0l57.35-56.15a6.35 6.35 0 0 1 8.86 0Z" /></svg>`;
 }
 function privyWalletDetected(wallet) {
-  if (wallet.id === "wallet_connect_qr_solana") return false;
+  if (wallet.id === "wallet_connect") return false;
   return state.wallets.some((candidate) => walletBrand(candidate.name) === wallet.id);
 }
 function privyWalletChoices(privyReady) {
@@ -255,7 +255,7 @@ function privyWalletChoices(privyReady) {
     const detected = privyWalletDetected(wallet);
     const busy = state.privyBusy === wallet.id;
     const waiting = state.backend === "online" && !privyReady;
-    const status = busy ? "Check your wallet…" : waiting ? "Loading…" : detected ? "Installed" : wallet.id === "wallet_connect_qr_solana" ? "Scan QR" : "Open or install";
+    const status = busy ? "Check your wallet…" : waiting ? "Loading…" : detected ? "Installed" : wallet.id === "wallet_connect" ? "Compatible options only" : "Open or install";
     return `<button class="wallet-choice wallet-choice-${escapeHtml(wallet.id)}" data-action="connect-privy-wallet" data-wallet-id="${escapeHtml(wallet.id)}" ${privyReady && !state.privyBusy ? "" : "disabled"}><span class="wallet-choice-logo">${privyWalletIcon(wallet)}</span><span class="wallet-choice-copy"><strong>${escapeHtml(wallet.name)}</strong><small class="${detected ? "is-detected" : ""}">${escapeHtml(status)}</small></span><span class="wallet-choice-arrow" aria-hidden="true">${busy ? "···" : "→"}</span></button>`;
   }).join("")}</div>`;
 }
