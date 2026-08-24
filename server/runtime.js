@@ -16,6 +16,7 @@ import { createSafeBetaDealer } from "./safe-beta-dealer.js";
 import { RuntimeMonitoring } from "./monitoring.js";
 import { ReadOnlyXStocksHoldings } from "./xstocks-holdings.js";
 import { createPrivyAuthenticator } from "./privy-auth.js";
+import { CURRENT_SCHEMA_MIGRATION } from "./migrate.js";
 
 function logError(logger, event, error, context = {}) {
   logger.error(JSON.stringify({
@@ -84,7 +85,7 @@ export async function createAuthoritativeRuntime({
   try {
     await pool.query("SELECT 1");
     const schema = await pool.query("SELECT name FROM schema_migrations ORDER BY name DESC LIMIT 1");
-    if (schema.rows[0]?.name !== "006_dealer_signing_keys.sql") {
+    if (schema.rows[0]?.name !== CURRENT_SCHEMA_MIGRATION) {
       throw new Error("Database schema is not current; run npm run migrate");
     }
     if (!redis.isOpen) await redis.connect();

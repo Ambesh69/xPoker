@@ -7,7 +7,7 @@ Status: zero-value multiplayer candidate. `REAL_VALUE_MODE` must remain disabled
 - Frontend: `https://xpoker.vercel.app`
 - Authoritative API/WebSocket origin: `https://xpoker-api-production.up.railway.app`
 - Runtime: Railway container with managed PostgreSQL and Redis on the project-private network
-- Schema: migrations `001_core.sql` through `006_dealer_signing_keys.sql` run as a pre-deploy release step
+- Schema: migrations `001_core.sql` through `007_hand_history_indexes.sql` run as a pre-deploy release step
 - Health gate: `/health/ready` must confirm both authoritative dependencies before a deployment is promoted
 - Operational gate: `/health/ops` must report healthy dependency latency, queues, clocks, table progress, drand reservations, HTTP errors, and realtime disconnects
 - Value boundary: `REAL_VALUE_MODE=disabled`; the release-status endpoint deliberately reports the unfulfilled real-value gates

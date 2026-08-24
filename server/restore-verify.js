@@ -1,6 +1,6 @@
 import { createPostgresPool } from "./postgres-hand-store.js";
 import { PostgresTableEventStore } from "./postgres-table-store.js";
-import { applyMigrations } from "./migrate.js";
+import { applyMigrations, CURRENT_SCHEMA_MIGRATION } from "./migrate.js";
 import { AuthoritativeTableCoordinator } from "./table-coordinator.js";
 
 function assert(condition, message) {
@@ -33,7 +33,7 @@ async function verifyHandChains(pool) {
 export async function verifyRestore({ pool } = {}) {
   assert(pool?.query, "A restored PostgreSQL pool is required");
   const migrations = await applyMigrations({ pool });
-  assert(migrations.current === "006_dealer_signing_keys.sql", "Restored schema is not current");
+  assert(migrations.current === CURRENT_SCHEMA_MIGRATION, "Restored schema is not current");
   assert(migrations.applied.length === 0, "Restore verification must not need to mutate the schema");
 
   const triggers = await pool.query(
