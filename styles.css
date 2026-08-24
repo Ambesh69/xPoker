@@ -5925,3 +5925,85 @@ a:focus-visible {
   .table-page .hero-cards .card-face i { font-size: 28px; }
   .table-page .seat.is-self:has(.hero-cards) .player-avatar { transform: translate(68px, 4px); }
 }
+
+/* PLO needs a composed four-card hand, not a compressed NLH fan. */
+.table-page .hero-cards.cards-4 {
+  bottom: 69px;
+}
+
+.table-page .hero-cards.cards-4 .card {
+  width: clamp(54px, 2.8vw, 62px);
+  height: clamp(77px, 4vw, 88px);
+}
+
+.table-page .hero-cards.cards-4 .card + .card {
+  margin-left: -9px;
+}
+
+.table-page .hero-cards.cards-4 .card:nth-child(1),
+.table-page .hero-cards.cards-4 .card:nth-child(4) {
+  position: relative;
+  top: 3px;
+}
+
+.table-page .hero-cards.cards-4 .card-face b {
+  font-size: clamp(25px, 1.35vw, 30px);
+}
+
+.table-page .hero-cards.cards-4 .rank-t .card-face b {
+  font-size: clamp(21px, 1.12vw, 25px);
+}
+
+.table-page .hero-cards.cards-4 .card-face i {
+  font-size: clamp(31px, 1.65vw, 37px);
+}
+
+.table-page .seat.is-self:has(.hero-cards.cards-4) .player-avatar {
+  transform: translate(120px, 5px);
+}
+
+@media (max-width: 980px) {
+  .table-page .hero-cards.cards-4 {
+    bottom: 65px;
+  }
+
+  .table-page .hero-cards.cards-4 .card {
+    width: 51px;
+    height: 73px;
+  }
+
+  .table-page .seat.is-self:has(.hero-cards.cards-4) .player-avatar {
+    transform: translate(108px, 5px);
+  }
+}
+
+@media (max-width: 680px) {
+  .table-page .hero-cards.cards-4 {
+    bottom: 58px;
+  }
+
+  .table-page .hero-cards.cards-4 .card {
+    width: 46px;
+    height: 66px;
+  }
+
+  .table-page .hero-cards.cards-4 .card + .card {
+    margin-left: -8px;
+  }
+
+  .table-page .hero-cards.cards-4 .card-face b {
+    font-size: 22px;
+  }
+
+  .table-page .hero-cards.cards-4 .rank-t .card-face b {
+    font-size: 19px;
+  }
+
+  .table-page .hero-cards.cards-4 .card-face i {
+    font-size: 29px;
+  }
+
+  .table-page .seat.is-self:has(.hero-cards.cards-4) .player-avatar {
+    transform: translate(91px, 4px);
+  }
+}

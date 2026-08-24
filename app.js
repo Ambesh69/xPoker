@@ -533,7 +533,8 @@ function tableSeat({ actualSeat, displayIndex, x, y }, visual, presentation = {}
   const privateDealPending = Boolean(isSelf && inHand && !presentation.resultMode && !privateDealReady);
   const shownCards = privateDealReady ? visibleHoleCards.map((reveal) => reveal.card.code) : Array.from({ length: inHand ? expectedCards : 0 }, () => "?");
   const cards = shownCards.length ? `<span class="hole-cards ${isSelf ? "hero-cards" : "opponent-cards"} cards-${shownCards.length} ${privateDealPending ? "private-deal-pending" : ""}">${shownCards.map((code, index) => {
-    const fan = (index - (shownCards.length - 1) / 2) * (isSelf ? 4.5 : 3);
+    const fanStep = isSelf && shownCards.length === 4 ? 2.2 : isSelf ? 4.5 : 3;
+    const fan = (index - (shownCards.length - 1) / 2) * fanStep;
     const shouldAnimate = !presentation.resultMode && (privateDealReady ? index >= visual.holeStart : visual.handChanged);
     const privateReveal = privateDealReady && !visual.handChanged && visual.holeStart === 0;
     const dealDelay = privateReveal ? index * 72 : 180 + index * 190 + displayIndex * 42;
