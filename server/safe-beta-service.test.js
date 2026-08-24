@@ -111,3 +111,36 @@ test("closed-beta guest sessions redeem an access invite before becoming playabl
   assert.deepEqual(calls.map(([name]) => name), ["invite", "session"]);
   assert.equal(calls[0][1].code, "BETA-ABCDE-FGHJK");
 });
+
+test("hand history filters participant events before resolving hand results", async () => {
+  let captured;
+  const pool = {
+    connect() {},
+    async query(sql, params) {
+      captured = { sql, params };
+      return { rows: [{
+        id: "table:00000000-0000-4000-8000-000000000001:7",
+        status: "complete",
+        started_at: "2026-08-24T18:00:00.000Z",
+        completed_at: "2026-08-24T18:01:00.000Z",
+        deck_root: Buffer.from("ab".repeat(32), "hex"),
+        beacon_round: "1234",
+        rules: { name: "Rotation A", tableRules: { game: "ROE" } },
+        players: ["wallet-a", "wallet-b"],
+        result: { game: "PLO4", rakeAtomic: "2", payouts: [] },
+      }] };
+    },
+  };
+  const service = new SafeBetaService({
+    pool,
+    sessionStore: { issue() {} },
+    tableCoordinator: { state() {}, seatPlayer() {} },
+  });
+  const hands = await service.handHistory({ wallet: "wallet-a", limit: 10 });
+  assert.match(captured.sql, /FROM hand_events opened\s+JOIN hands hand ON hand\.id = opened\.hand_id/);
+  assert.match(captured.sql, /opened\.event_type = 'HAND_OPENED'/);
+  assert.match(captured.sql, /opened\.payload->'players' \? \$1/);
+  assert.deepEqual(captured.params, ["wallet-a", 10]);
+  assert.equal(hands[0].game, "PLO4");
+  assert.equal(hands[0].auditAvailable, true);
+});

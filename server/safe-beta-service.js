@@ -594,15 +594,9 @@ export class SafeBetaService {
               hand.beacon_round, room.rules,
               opened.payload->'players' AS players,
               finished.payload->'result' AS result
-         FROM hands hand
+         FROM hand_events opened
+         JOIN hands hand ON hand.id = opened.hand_id
          JOIN rooms room ON room.id = hand.room_id
-         JOIN LATERAL (
-           SELECT payload
-             FROM hand_events
-            WHERE hand_id = hand.id AND event_type = 'HAND_OPENED'
-            ORDER BY sequence ASC
-            LIMIT 1
-         ) opened ON true
          LEFT JOIN LATERAL (
            SELECT payload
              FROM table_events
@@ -612,7 +606,8 @@ export class SafeBetaService {
             ORDER BY sequence DESC
             LIMIT 1
          ) finished ON true
-        WHERE opened.payload->'players' ? $1
+        WHERE opened.event_type = 'HAND_OPENED'
+          AND opened.payload->'players' ? $1
         ORDER BY hand.started_at DESC, hand.id DESC
         LIMIT $2`,
       [wallet, pageSize],
@@ -621,7 +616,7 @@ export class SafeBetaService {
       handId: row.id,
       status: row.status,
       roomName: row.rules?.name ?? "Poker room",
-      game: row.rules?.tableRules?.game ?? row.result?.game ?? "NLH",
+      game: row.result?.game ?? row.rules?.tableRules?.game ?? "NLH",
       players: row.players ?? [],
       result: row.result ?? null,
       deckRoot: row.deck_root ? Buffer.from(row.deck_root).toString("hex") : null,

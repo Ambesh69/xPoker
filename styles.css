@@ -2865,6 +2865,26 @@ a:focus-visible {
   overflow: hidden;
 }
 
+.history-load-error {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  padding: 12px 20px;
+  border-bottom: 1px solid #e6b9b4;
+  color: #78302b;
+  background: #fff0ee;
+}
+
+.history-load-error div {
+  display: grid;
+  gap: 2px;
+}
+
+.history-load-error strong { font-size: 12px; }
+.history-load-error span { font-size: 10px; }
+.history-error-empty { color: #78302b; background: #fffaf9; }
+
 .history-head,
 .history-row {
   display: grid;
