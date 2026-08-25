@@ -138,7 +138,15 @@ function storeSession(result, walletName, wallet) {
 }
 
 function normalizeLobby(payload) {
-  state.assets = (payload.assets?.length ? payload.assets : FALLBACK_ASSETS).map((asset) => ({ ...asset, indicativePrice: asset.indicativePrice || asset.price }));
+  state.assets = (payload.assets?.length ? payload.assets : FALLBACK_ASSETS).map((asset) => {
+    const fallback = FALLBACK_ASSETS.find((candidate) => candidate.symbol === asset.symbol);
+    return {
+      ...fallback,
+      ...asset,
+      mint: asset.mint || fallback?.mint || XSTOCK_MINTS[asset.symbol],
+      indicativePrice: asset.indicativePrice || asset.price || fallback?.indicativePrice,
+    };
+  });
   state.rooms = payload.rooms?.length ? payload.rooms : FALLBACK_ROOMS;
   state.profile = payload.profile || null;
   state.selectedAsset = state.assets.find((asset) => asset.symbol === state.selectedAsset?.symbol) || state.assets[0];
