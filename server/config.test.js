@@ -86,22 +86,14 @@ test("Privy credentials are optional as a pair and the secret remains server-onl
   );
 });
 
-test("investment providers default to fail-closed sandbox configuration", () => {
+test("Jupiter swaps default to fail-closed configuration", () => {
   const defaults = loadConfig({});
-  assert.equal(defaults.alpacaBrokerEnvironment, "sandbox");
-  assert.equal(defaults.alpacaBrokerApiBase, "https://broker-api.sandbox.alpaca.markets");
-  assert.equal(defaults.alpacaBrokerApiKey, undefined);
   assert.equal(defaults.jupiterSwapsEnabled, false);
   const configured = loadConfig({
-    ALPACA_BROKER_API_KEY: "broker-key",
-    ALPACA_BROKER_API_SECRET: "broker-secret",
     JUPITER_API_KEY: "jupiter-key",
     JUPITER_SWAPS_ENABLED: "enabled",
   });
-  assert.equal(configured.alpacaBrokerApiKey, "broker-key");
   assert.equal(configured.jupiterSwapsEnabled, true);
-  assert.throws(() => loadConfig({ ALPACA_BROKER_API_KEY: "broker-key" }), /configured together/);
-  assert.throws(() => loadConfig({ ALPACA_BROKER_ENVIRONMENT: "production" }), /ALPACA_LIVE_TRADING/);
 });
 
 test("Railway's immutable deployment commit takes precedence over a stale configured commit", () => {

@@ -18,9 +18,8 @@ import { ReadOnlyXStocksHoldings } from "./xstocks-holdings.js";
 import { createPrivyAuthenticator } from "./privy-auth.js";
 import { CURRENT_SCHEMA_MIGRATION } from "./migrate.js";
 import { PostgresComplianceService } from "./compliance/service.js";
-import { AlpacaBrokerClient } from "./investments/alpaca-broker.js";
 import { JupiterSwapClient } from "./investments/jupiter-swap.js";
-import { PostgresInvestmentService } from "./investments/service.js";
+import { InvestmentService } from "./investments/service.js";
 
 function logError(logger, event, error, context = {}) {
   logger.error(JSON.stringify({
@@ -178,15 +177,8 @@ export async function createAuthoritativeRuntime({
       rpcUrl: config.solanaReadRpcUrl,
       apiBase: config.xstocksApiBase,
     });
-    investments = new PostgresInvestmentService({
-      pool,
+    investments = new InvestmentService({
       holdingsReader,
-      alpaca: new AlpacaBrokerClient({
-        baseUrl: config.alpacaBrokerApiBase,
-        apiKey: config.alpacaBrokerApiKey,
-        apiSecret: config.alpacaBrokerApiSecret,
-        environment: config.alpacaBrokerEnvironment,
-      }),
       jupiter: new JupiterSwapClient({
         baseUrl: config.jupiterApiBase,
         apiKey: config.jupiterApiKey,

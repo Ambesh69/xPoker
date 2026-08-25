@@ -416,24 +416,6 @@ async function handleInvestments({ request, response, requestId, url, config, au
       sendJson(response, 200, { ...(await investments.portfolio(wallet)), requestId }, requestId, cors);
       return;
     }
-    if (url.pathname === "/v1/investments/alpaca/accounts" && request.method === "POST") {
-      const body = await readJson(request, config.bodyLimitBytes);
-      const forwarded = String(request.headers["x-forwarded-for"] || "").split(",")[0].trim();
-      const ipAddress = forwarded || request.socket?.remoteAddress;
-      sendJson(response, 202, {
-        ...(await investments.openSandboxAccount({ wallet, applicant: body, ipAddress })),
-        requestId,
-      }, requestId, cors);
-      return;
-    }
-    if (url.pathname === "/v1/investments/alpaca/orders" && request.method === "POST") {
-      const body = await readJson(request, config.bodyLimitBytes);
-      sendJson(response, 201, {
-        ...(await investments.buyFractional({ wallet, symbol: body.symbol, notional: body.notional })),
-        requestId,
-      }, requestId, cors);
-      return;
-    }
     if (url.pathname === "/v1/investments/swaps/order" && request.method === "POST") {
       const body = await readJson(request, config.bodyLimitBytes);
       sendJson(response, 200, {

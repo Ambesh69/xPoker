@@ -376,18 +376,18 @@ test("authenticated wallet holdings are read-only and bound to the session walle
   assert.deepEqual(calls, [{ wallet }]);
 });
 
-test("investment routes bind brokerage and swap operations to the signed wallet", async () => {
+test("investment routes bind wallet holdings and swaps to the signed wallet", async () => {
   const wallet = encodeBase58(Buffer.alloc(32, 15));
   const calls = [];
   const investments = {
-    status: async (inputWallet) => { calls.push(["status", inputWallet]); return { brokerage: { provider: "alpaca" }, swaps: { provider: "jupiter" } }; },
+    status: async (inputWallet) => { calls.push(["status", inputWallet]); return { swaps: { provider: "jupiter" }, walletHoldings: { supported: true } }; },
     swapOrder: async (input) => { calls.push(["swap", input]); return { requestId: "swap_request_123", transaction: "A".repeat(128) }; },
   };
   const headers = { origin: "https://play.xpoker.example", authorization: "Bearer investment-session" };
   const auth = { sessionStore: { authenticate: async () => ({ wallet, expiresAt: "2099-01-01T00:00:00.000Z" }) } };
   const status = await request(config(false), "/v1/investments/status", { headers, auth, investments });
   assert.equal(status.response.status, 200);
-  assert.equal(status.body.brokerage.provider, "alpaca");
+  assert.equal(status.body.swaps.provider, "jupiter");
   const order = await request(config(false), "/v1/investments/swaps/order", {
     method: "POST", headers, auth, investments,
     body: { inputSymbol: "SOL", outputSymbol: "AAPLx", amountAtomic: "100000000" },

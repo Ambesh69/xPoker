@@ -101,19 +101,6 @@ export function loadConfig(env = process.env) {
   if (Boolean(privyAppId) !== Boolean(privyAppSecret)) {
     throw new Error("PRIVY_APP_ID and PRIVY_APP_SECRET must be configured together");
   }
-  const alpacaBrokerApiKey = optionalProviderCredential(env.ALPACA_BROKER_API_KEY, "ALPACA_BROKER_API_KEY");
-  const alpacaBrokerApiSecret = optionalProviderCredential(env.ALPACA_BROKER_API_SECRET, "ALPACA_BROKER_API_SECRET");
-  if (Boolean(alpacaBrokerApiKey) !== Boolean(alpacaBrokerApiSecret)) {
-    throw new Error("ALPACA_BROKER_API_KEY and ALPACA_BROKER_API_SECRET must be configured together");
-  }
-  const alpacaBrokerEnvironment = optionalChoice(
-    env.ALPACA_BROKER_ENVIRONMENT ?? "sandbox",
-    "ALPACA_BROKER_ENVIRONMENT",
-    ["sandbox", "production"],
-  );
-  if (alpacaBrokerEnvironment === "production" && env.ALPACA_LIVE_TRADING !== "enabled") {
-    throw new Error("Production Alpaca trading requires ALPACA_LIVE_TRADING=enabled");
-  }
   const complianceAllowedCountries = countries(env.COMPLIANCE_ALLOWED_COUNTRIES);
   const compliancePolicySha256 = optionalHex32(env.COMPLIANCE_POLICY_SHA256, "COMPLIANCE_POLICY_SHA256");
   const compliancePolicyConfigured = Boolean(
@@ -178,16 +165,6 @@ export function loadConfig(env = process.env) {
       "XSTOCKS_API_BASE",
     ).replace(/\/$/, ""),
     xstocksApiKey: env.XSTOCKS_API_KEY,
-    alpacaBrokerEnvironment,
-    alpacaBrokerApiBase: optionalHttpsUrl(
-      env.ALPACA_BROKER_API_BASE ?? (alpacaBrokerEnvironment === "production"
-        ? "https://broker-api.alpaca.markets"
-        : "https://broker-api.sandbox.alpaca.markets"),
-      "ALPACA_BROKER_API_BASE",
-    ).replace(/\/$/, ""),
-    alpacaBrokerApiKey,
-    alpacaBrokerApiSecret,
-    alpacaLiveTrading: alpacaBrokerEnvironment === "production" && env.ALPACA_LIVE_TRADING === "enabled",
     jupiterApiBase: optionalHttpsUrl(env.JUPITER_API_BASE ?? "https://api.jup.ag/swap/v2", "JUPITER_API_BASE").replace(/\/$/, ""),
     jupiterApiKey: optionalProviderCredential(env.JUPITER_API_KEY, "JUPITER_API_KEY"),
     jupiterSwapsEnabled: env.JUPITER_SWAPS_ENABLED === "enabled",
