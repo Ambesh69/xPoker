@@ -20,6 +20,7 @@ import { RemoteTranscriptSigner, TranscriptSigner, verifyTranscript } from "./tr
 const PREPARATION_PREFIX = "xpoker:safe-beta:preparation:";
 const COMMITTED_PREFIX = "xpoker:safe-beta:committed:";
 const LOCK_PREFIX = "xpoker:safe-beta:dealer-lock:";
+const LOCK_RETRY_MS = 1_000;
 
 function hash(value) {
   return createHash("sha256").update(canonicalJson(value)).digest("hex");
@@ -162,7 +163,7 @@ export class SafeBetaDealer {
 
   async run(tableId) {
     if (this.closed) return;
-    await this.#withLock(tableId, async () => {
+    const acquired = await this.#withLock(tableId, async () => {
       let table = await this.tableCoordinator.state(tableId);
       if (table.status === "WAITING") {
         const active = table.seats.filter((seat) => seat.status === "SEATED" && BigInt(seat.stack) > 0n && !seat.leaving);
@@ -172,6 +173,11 @@ export class SafeBetaDealer {
       }
       if (table.status === "HAND_ACTIVE") await this.#advance(tableId);
     });
+    // During rolling deploys an exiting replica can retain the distributed
+    // lock until its TTL expires. A startup recovery attempt must retry after
+    // lock contention because there may be no subsequent table event to wake
+    // a hand that is already waiting on its reserved beacon round.
+    if (!acquired) this.schedule(tableId, LOCK_RETRY_MS);
   }
 
   async #prepareAndStart(table) {

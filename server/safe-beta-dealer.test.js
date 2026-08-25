@@ -226,3 +226,31 @@ test("safe-beta dealer leaves the table waiting when the reserved beacon cannot 
   assert.equal(redis.values.size, 0);
   await dealer.close();
 });
+
+test("safe-beta dealer retries startup recovery after another replica owns the table lock", async () => {
+  const redis = new TestRedis();
+  const tableId = "20000000-0000-4000-8000-000000000021";
+  await redis.set(`xpoker:safe-beta:dealer-lock:${tableId}`, "exiting-replica", { NX: true });
+  const retries = [];
+  const dealer = new SafeBetaDealer({
+    redis,
+    tableCoordinator: {
+      state: async () => {
+        throw new Error("The locked table must not be read");
+      },
+      startHand: async () => {},
+    },
+    handCoordinator: {
+      state: async () => ({ status: "MISSING" }),
+      openHand: async () => {},
+      signer: { keyId: "test-key" },
+    },
+    dealerStore: new TestDealerStore(),
+  });
+  dealer.schedule = (scheduledTableId, waitMs) => retries.push({ scheduledTableId, waitMs });
+
+  await dealer.run(tableId);
+
+  assert.deepEqual(retries, [{ scheduledTableId: tableId, waitMs: 1_000 }]);
+  await dealer.close();
+});
