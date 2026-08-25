@@ -1,4 +1,5 @@
 import { decodeBase58 } from "./wallet-auth.js";
+import { createCompliancePolicy } from "./compliance/policy.js";
 
 function integer(value, fallback, { minimum, maximum, label }) {
   const parsed = value === undefined ? fallback : Number(value);
@@ -51,6 +52,22 @@ function optionalChoice(value, label, choices) {
   return value;
 }
 
+function optionalHex32(value, label) {
+  if (!value) return undefined;
+  if (!/^[0-9a-f]{64}$/i.test(value) || /^0{64}$/i.test(value)) {
+    throw new Error(`${label} must be a nonzero 32-byte hex digest`);
+  }
+  return value.toLowerCase();
+}
+
+function countries(value) {
+  if (!value) return [];
+  return [...new Set(value.split(",").map((item) => item.trim().toUpperCase()).filter(Boolean))].map((item) => {
+    if (!/^[A-Z]{2}$/.test(item)) throw new Error("COMPLIANCE_ALLOWED_COUNTRIES must contain ISO alpha-2 country codes");
+    return item;
+  }).sort();
+}
+
 function optionalSignerUrl(value) {
   if (!value) return undefined;
   const url = new URL(value);
@@ -76,6 +93,31 @@ export function loadConfig(env = process.env) {
   if (Boolean(privyAppId) !== Boolean(privyAppSecret)) {
     throw new Error("PRIVY_APP_ID and PRIVY_APP_SECRET must be configured together");
   }
+  const complianceAllowedCountries = countries(env.COMPLIANCE_ALLOWED_COUNTRIES);
+  const compliancePolicySha256 = optionalHex32(env.COMPLIANCE_POLICY_SHA256, "COMPLIANCE_POLICY_SHA256");
+  const compliancePolicyConfigured = Boolean(
+    env.COMPLIANCE_POLICY_VERSION
+    || compliancePolicySha256
+    || complianceAllowedCountries.length
+    || env.COMPLIANCE_MINIMUM_AGE,
+  );
+  const compliancePolicy = compliancePolicyConfigured ? createCompliancePolicy({
+    version: env.COMPLIANCE_POLICY_VERSION,
+    policySha256: compliancePolicySha256,
+    allowedCountries: complianceAllowedCountries,
+    minimumAge: env.COMPLIANCE_MINIMUM_AGE,
+    evidenceMaxAgeSeconds: integer(env.COMPLIANCE_EVIDENCE_MAX_AGE_SECONDS, 86_400, {
+      minimum: 300,
+      maximum: 2_592_000,
+      label: "COMPLIANCE_EVIDENCE_MAX_AGE_SECONDS",
+    }),
+    decisionTtlSeconds: integer(env.COMPLIANCE_DECISION_TTL_SECONDS, 900, {
+      minimum: 60,
+      maximum: 86_400,
+      label: "COMPLIANCE_DECISION_TTL_SECONDS",
+    }),
+    requireQualifiedInvestor: env.COMPLIANCE_REQUIRE_QUALIFIED_INVESTOR === "enabled",
+  }) : undefined;
   return Object.freeze({
     nodeEnv,
     host: env.HOST ?? "127.0.0.1",
@@ -116,7 +158,52 @@ export function loadConfig(env = process.env) {
     ).replace(/\/$/, ""),
     xstocksApiKey: env.XSTOCKS_API_KEY,
     geofencingProvider: env.GEOFENCING_PROVIDER,
+    geofencingConfigurationSha256: optionalHex32(
+      env.GEOFENCING_CONFIGURATION_SHA256,
+      "GEOFENCING_CONFIGURATION_SHA256",
+    ),
     identityProvider: env.IDENTITY_PROVIDER,
+    identityConfigurationSha256: optionalHex32(
+      env.IDENTITY_CONFIGURATION_SHA256,
+      "IDENTITY_CONFIGURATION_SHA256",
+    ),
+    sanctionsProvider: env.SANCTIONS_PROVIDER,
+    sanctionsConfigurationSha256: optionalHex32(
+      env.SANCTIONS_CONFIGURATION_SHA256,
+      "SANCTIONS_CONFIGURATION_SHA256",
+    ),
+    sourceOfFundsProvider: env.SOURCE_OF_FUNDS_PROVIDER,
+    sourceOfFundsConfigurationSha256: optionalHex32(
+      env.SOURCE_OF_FUNDS_CONFIGURATION_SHA256,
+      "SOURCE_OF_FUNDS_CONFIGURATION_SHA256",
+    ),
+    complianceAllowedCountries,
+    compliancePolicy,
+    compliancePolicySha256,
+    xstocksClientApprovalSha256: optionalHex32(
+      env.XSTOCKS_CLIENT_APPROVAL_SHA256,
+      "XSTOCKS_CLIENT_APPROVAL_SHA256",
+    ),
+    xstocksEligibilityProvider: env.XSTOCKS_ELIGIBILITY_PROVIDER,
+    xstocksEligibilityConfigurationSha256: optionalHex32(
+      env.XSTOCKS_ELIGIBILITY_CONFIGURATION_SHA256,
+      "XSTOCKS_ELIGIBILITY_CONFIGURATION_SHA256",
+    ),
+    custodyPolicySha256: optionalHex32(env.CUSTODY_POLICY_SHA256, "CUSTODY_POLICY_SHA256"),
+    custodyAuthorityMode: optionalChoice(env.CUSTODY_AUTHORITY_MODE, "CUSTODY_AUTHORITY_MODE", [
+      "escrow_program",
+      "hsm_multisig",
+    ]),
+    withdrawalApprovalQuorum: integer(env.WITHDRAWAL_APPROVAL_QUORUM, 2, {
+      minimum: 2,
+      maximum: 9,
+      label: "WITHDRAWAL_APPROVAL_QUORUM",
+    }),
+    withdrawalCoolingOffSeconds: integer(env.WITHDRAWAL_COOLING_OFF_SECONDS, 900, {
+      minimum: 60,
+      maximum: 604_800,
+      label: "WITHDRAWAL_COOLING_OFF_SECONDS",
+    }),
     monitoringDsn: env.MONITORING_DSN,
     externalUptimeProvider: optionalChoice(env.EXTERNAL_UPTIME_PROVIDER, "EXTERNAL_UPTIME_PROVIDER", ["github-actions"]),
     externalUptimeUrl: optionalHttpsUrl(env.EXTERNAL_UPTIME_URL, "EXTERNAL_UPTIME_URL"),

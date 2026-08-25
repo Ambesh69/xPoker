@@ -7,6 +7,7 @@ import {
   signReleaseManifest,
   verifyReleaseManifestSignature,
 } from "./release-manifest.js";
+import { createCompliancePolicy, policyConfigurationDigest } from "./compliance/policy.js";
 
 function required(value, label) {
   if (!value) throw new Error(`${label} is required`);
@@ -27,12 +28,25 @@ function releaseAuthorityKeyId(privateKeyPem) {
   return createHash("sha256").update(der).digest("hex");
 }
 
+function countries(value) {
+  return [...new Set((value ?? "").split(",").map((item) => item.trim().toUpperCase()).filter(Boolean))].sort();
+}
+
 function generatedManifest(env) {
   const privateKeyPem = required(env.RELEASE_AUTHORITY_PRIVATE_KEY_PEM, "RELEASE_AUTHORITY_PRIVATE_KEY_PEM");
   const buildCommit = required(env.BUILD_COMMIT, "BUILD_COMMIT");
   if (!/^[0-9a-f]{40}$/i.test(buildCommit)) throw new Error("BUILD_COMMIT must be a full 40-character Git commit");
   const dealerSignerKeyId = required(env.DEALER_SIGNER_KEY_ID, "DEALER_SIGNER_KEY_ID");
   if (!/^[0-9a-f]{32}$/i.test(dealerSignerKeyId)) throw new Error("DEALER_SIGNER_KEY_ID must be a 128-bit transcript key ID");
+  const compliancePolicy = env.COMPLIANCE_POLICY_VERSION ? createCompliancePolicy({
+    version: env.COMPLIANCE_POLICY_VERSION,
+    policySha256: required(env.COMPLIANCE_POLICY_SHA256, "COMPLIANCE_POLICY_SHA256"),
+    allowedCountries: countries(required(env.COMPLIANCE_ALLOWED_COUNTRIES, "COMPLIANCE_ALLOWED_COUNTRIES")),
+    minimumAge: required(env.COMPLIANCE_MINIMUM_AGE, "COMPLIANCE_MINIMUM_AGE"),
+    evidenceMaxAgeSeconds: env.COMPLIANCE_EVIDENCE_MAX_AGE_SECONDS ?? 86_400,
+    decisionTtlSeconds: env.COMPLIANCE_DECISION_TTL_SECONDS ?? 900,
+    requireQualifiedInvestor: env.COMPLIANCE_REQUIRE_QUALIFIED_INVESTOR === "enabled",
+  }) : undefined;
   const unsigned = {
     version: RELEASE_MANIFEST_VERSION,
     generatedAt: new Date().toISOString(),
@@ -53,6 +67,27 @@ function generatedManifest(env) {
       programId: env.SETTLEMENT_PROGRAM_ID ?? "",
       binarySha256: env.SETTLEMENT_PROGRAM_BINARY_SHA256 ?? "",
       upgradeAuthority: env.SETTLEMENT_UPGRADE_AUTHORITY ?? "",
+    },
+    compliance: {
+      policyVersion: compliancePolicy?.version ?? "",
+      policySha256: compliancePolicy?.policySha256 ?? "",
+      configurationSha256: compliancePolicy ? policyConfigurationDigest(compliancePolicy) : "",
+      geofencingProvider: env.GEOFENCING_PROVIDER ?? "",
+      geofencingConfigurationSha256: env.GEOFENCING_CONFIGURATION_SHA256 ?? "",
+      identityProvider: env.IDENTITY_PROVIDER ?? "",
+      identityConfigurationSha256: env.IDENTITY_CONFIGURATION_SHA256 ?? "",
+      sanctionsProvider: env.SANCTIONS_PROVIDER ?? "",
+      sanctionsConfigurationSha256: env.SANCTIONS_CONFIGURATION_SHA256 ?? "",
+      sourceOfFundsProvider: env.SOURCE_OF_FUNDS_PROVIDER ?? "",
+      sourceOfFundsConfigurationSha256: env.SOURCE_OF_FUNDS_CONFIGURATION_SHA256 ?? "",
+      xstocksEligibilityProvider: env.XSTOCKS_ELIGIBILITY_PROVIDER ?? "",
+      xstocksEligibilityConfigurationSha256: env.XSTOCKS_ELIGIBILITY_CONFIGURATION_SHA256 ?? "",
+    },
+    custody: {
+      policySha256: env.CUSTODY_POLICY_SHA256 ?? "",
+      authorityMode: env.CUSTODY_AUTHORITY_MODE ?? "",
+      withdrawalApprovalQuorum: Number(env.WITHDRAWAL_APPROVAL_QUORUM ?? 0),
+      xstocksClientApprovalSha256: env.XSTOCKS_CLIENT_APPROVAL_SHA256 ?? "",
     },
     evidence: evidenceTemplate(),
   };

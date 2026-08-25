@@ -1,5 +1,6 @@
 import { verifyReleaseManifestSignature } from "./release-manifest.js";
 import { decodeBase58, encodeBase58 } from "./wallet-auth.js";
+import { policyConfigurationDigest, XSTOCKS_HARD_BLOCKED_COUNTRIES } from "./compliance/policy.js";
 
 const HEX_32 = /^[0-9a-f]{64}$/i;
 const TRANSCRIPT_KEY_ID = /^[0-9a-f]{32}$/i;
@@ -73,6 +74,43 @@ function optionalMatches(manifestValue, configuredValue) {
   return (manifestValue ?? "") === (configuredValue ?? "");
 }
 
+function namedProvider(value) {
+  return typeof value === "string" && /^[a-z0-9][a-z0-9._-]{1,63}$/i.test(value);
+}
+
+function configuredCompliancePolicy(config) {
+  const policy = config.compliancePolicy;
+  return Boolean(policy)
+    && HEX_32.test(config.compliancePolicySha256 ?? "")
+    && policy.policySha256 === config.compliancePolicySha256
+    && policy.allowedCountries.length > 0
+    && policy.allowedCountries.every((country) => !XSTOCKS_HARD_BLOCKED_COUNTRIES.has(country));
+}
+
+function complianceManifestMatches(config, manifest) {
+  if (!config.compliancePolicy) return false;
+  return manifest?.compliance?.policyVersion === config.compliancePolicy.version
+    && manifest.compliance.policySha256 === config.compliancePolicySha256
+    && manifest.compliance.configurationSha256 === policyConfigurationDigest(config.compliancePolicy)
+    && manifest.compliance.geofencingProvider === config.geofencingProvider
+    && manifest.compliance.geofencingConfigurationSha256 === config.geofencingConfigurationSha256
+    && manifest.compliance.identityProvider === config.identityProvider
+    && manifest.compliance.identityConfigurationSha256 === config.identityConfigurationSha256
+    && manifest.compliance.sanctionsProvider === config.sanctionsProvider
+    && manifest.compliance.sanctionsConfigurationSha256 === config.sanctionsConfigurationSha256
+    && manifest.compliance.sourceOfFundsProvider === config.sourceOfFundsProvider
+    && manifest.compliance.sourceOfFundsConfigurationSha256 === config.sourceOfFundsConfigurationSha256
+    && manifest.compliance.xstocksEligibilityProvider === config.xstocksEligibilityProvider
+    && manifest.compliance.xstocksEligibilityConfigurationSha256 === config.xstocksEligibilityConfigurationSha256;
+}
+
+function custodyManifestMatches(config, manifest) {
+  return manifest?.custody?.policySha256 === (config.custodyPolicySha256 ?? "")
+    && manifest?.custody?.authorityMode === (config.custodyAuthorityMode ?? "")
+    && manifest?.custody?.withdrawalApprovalQuorum === config.withdrawalApprovalQuorum
+    && manifest?.custody?.xstocksClientApprovalSha256 === (config.xstocksClientApprovalSha256 ?? "");
+}
+
 export function evaluateReleaseGates({ config, manifest, runtimeAttestations, now = new Date() }) {
   const checks = [
     ["postgres_tls", config.databaseUrl?.startsWith("postgres") && /sslmode=(require|verify-full)/.test(config.databaseUrl)],
@@ -84,8 +122,23 @@ export function evaluateReleaseGates({ config, manifest, runtimeAttestations, no
     ["settlement_binary_pinned", HEX_32.test(config.settlementProgramBinarySha256 ?? "")],
     ["settlement_upgrade_authority", config.settlementUpgradeAuthority === "immutable" || isSolanaPublicKey(config.settlementUpgradeAuthority)],
     ["strict_origins", config.allowedOrigins.length > 0 && config.allowedOrigins.every((origin) => origin.startsWith("https://"))],
-    ["geofencing_configured", Boolean(config.geofencingProvider)],
-    ["identity_controls_configured", Boolean(config.identityProvider)],
+    ["geofencing_configured", namedProvider(config.geofencingProvider)
+      && HEX_32.test(config.geofencingConfigurationSha256 ?? "")],
+    ["identity_controls_configured", namedProvider(config.identityProvider)
+      && HEX_32.test(config.identityConfigurationSha256 ?? "")],
+    ["sanctions_controls_configured", namedProvider(config.sanctionsProvider)
+      && HEX_32.test(config.sanctionsConfigurationSha256 ?? "")],
+    ["source_of_funds_controls_configured", namedProvider(config.sourceOfFundsProvider)
+      && HEX_32.test(config.sourceOfFundsConfigurationSha256 ?? "")],
+    ["xstocks_eligibility_controls_configured", namedProvider(config.xstocksEligibilityProvider)
+      && HEX_32.test(config.xstocksEligibilityConfigurationSha256 ?? "")],
+    ["compliance_policy_configured", configuredCompliancePolicy(config)],
+    ["xstocks_client_approved", HEX_32.test(config.xstocksClientApprovalSha256 ?? "")
+      && typeof config.xstocksApiKey === "string" && config.xstocksApiKey.length >= 16],
+    ["custody_controls_configured", HEX_32.test(config.custodyPolicySha256 ?? "")
+      && config.custodyAuthorityMode === "hsm_multisig"
+      && Number.isInteger(config.withdrawalApprovalQuorum)
+      && config.withdrawalApprovalQuorum >= 2],
     ["monitoring_configured", monitoringConfigured(config)],
     ["asset_allowlist_versioned", /^[a-z0-9][a-z0-9._-]{7,127}$/i.test(config.assetAllowlistVersion ?? "")],
     ["release_manifest_version", manifest?.version === "xpoker-release/v1"],
@@ -96,6 +149,8 @@ export function evaluateReleaseGates({ config, manifest, runtimeAttestations, no
       && optionalMatches(manifest?.settlementProgram?.programId, config.settlementProgramId)
       && optionalMatches(manifest?.settlementProgram?.binarySha256, config.settlementProgramBinarySha256)
       && optionalMatches(manifest?.settlementProgram?.upgradeAuthority, config.settlementUpgradeAuthority)],
+    ["release_matches_compliance", complianceManifestMatches(config, manifest)],
+    ["release_matches_custody", custodyManifestMatches(config, manifest)],
     ["release_manifest_signature", verifyReleaseManifestSignature(manifest, config.releaseAuthorityPublicKeyPem)],
     ["application_security_audit", evidencePassed(manifest?.evidence?.applicationSecurityAudit, now)],
     ["cryptography_audit", evidencePassed(manifest?.evidence?.cryptographyAudit, now)],
@@ -121,6 +176,18 @@ export function evaluateReleaseGates({ config, manifest, runtimeAttestations, no
         programId: config.settlementProgramId,
         binarySha256: config.settlementProgramBinarySha256,
         upgradeAuthority: config.settlementUpgradeAuthority,
+      }),
+      compliance: Object.freeze({
+        policyVersion: config.compliancePolicy?.version,
+        policySha256: config.compliancePolicySha256,
+        configurationSha256: config.compliancePolicy ? policyConfigurationDigest(config.compliancePolicy) : undefined,
+        allowedCountries: config.compliancePolicy?.allowedCountries ?? [],
+      }),
+      custody: Object.freeze({
+        policySha256: config.custodyPolicySha256,
+        authorityMode: config.custodyAuthorityMode,
+        withdrawalApprovalQuorum: config.withdrawalApprovalQuorum,
+        xstocksClientApprovalSha256: config.xstocksClientApprovalSha256,
       }),
     }),
   });

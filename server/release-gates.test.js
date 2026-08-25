@@ -4,6 +4,7 @@ import test from "node:test";
 
 import { canonicalJson } from "../fairness/protocol.js";
 import { evaluateReleaseGates } from "./release-gates.js";
+import { createCompliancePolicy, policyConfigurationDigest } from "./compliance/policy.js";
 
 function evidence() {
   return {
@@ -17,6 +18,12 @@ function evidence() {
 function productionFixture() {
   const authority = generateKeyPairSync("ed25519");
   const buildCommit = "a".repeat(40);
+  const compliancePolicy = createCompliancePolicy({
+    version: "counsel-approved-v1",
+    policySha256: "12".repeat(32),
+    allowedCountries: ["CH"],
+    minimumAge: 21,
+  });
   const config = {
       realValueMode: true,
       databaseUrl: "postgresql://db/xpoker?sslmode=verify-full",
@@ -31,7 +38,22 @@ function productionFixture() {
       settlementUpgradeAuthority: "SysvarRent111111111111111111111111111111111",
       allowedOrigins: ["https://xpoker.example"],
       geofencingProvider: "provider",
+      geofencingConfigurationSha256: "34".repeat(32),
       identityProvider: "provider",
+      identityConfigurationSha256: "56".repeat(32),
+      sanctionsProvider: "provider",
+      sanctionsConfigurationSha256: "78".repeat(32),
+      sourceOfFundsProvider: "provider",
+      sourceOfFundsConfigurationSha256: "79".repeat(32),
+      xstocksEligibilityProvider: "xstocks",
+      xstocksEligibilityConfigurationSha256: "80".repeat(32),
+      compliancePolicy,
+      compliancePolicySha256: compliancePolicy.policySha256,
+      xstocksClientApprovalSha256: "90".repeat(32),
+      xstocksApiKey: "partner-api-key-1234567890",
+      custodyPolicySha256: "ab".repeat(32),
+      custodyAuthorityMode: "hsm_multisig",
+      withdrawalApprovalQuorum: 2,
       monitoringDsn: "https://monitor.example/project",
       assetAllowlistVersion: "allowlist-v1",
       buildCommit,
@@ -50,6 +72,27 @@ function productionFixture() {
         programId: "14dia6Spfd6qu6Q36caisExYQsLA9si4PqFpqfiQ8Z9S",
         binarySha256: "cd".repeat(32),
         upgradeAuthority: "SysvarRent111111111111111111111111111111111",
+      },
+      compliance: {
+        policyVersion: compliancePolicy.version,
+        policySha256: compliancePolicy.policySha256,
+        configurationSha256: policyConfigurationDigest(compliancePolicy),
+        geofencingProvider: "provider",
+        geofencingConfigurationSha256: "34".repeat(32),
+        identityProvider: "provider",
+        identityConfigurationSha256: "56".repeat(32),
+        sanctionsProvider: "provider",
+        sanctionsConfigurationSha256: "78".repeat(32),
+        sourceOfFundsProvider: "provider",
+        sourceOfFundsConfigurationSha256: "79".repeat(32),
+        xstocksEligibilityProvider: "xstocks",
+        xstocksEligibilityConfigurationSha256: "80".repeat(32),
+      },
+      custody: {
+        policySha256: "ab".repeat(32),
+        authorityMode: "hsm_multisig",
+        withdrawalApprovalQuorum: 2,
+        xstocksClientApprovalSha256: "90".repeat(32),
       },
       evidence: {
         applicationSecurityAudit: evidence(),

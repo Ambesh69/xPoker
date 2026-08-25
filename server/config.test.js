@@ -93,3 +93,28 @@ test("Railway's immutable deployment commit takes precedence over a stale config
   });
   assert.equal(config.buildCommit, "b".repeat(40));
 });
+
+test("compliance configuration is fail-closed, versioned and rejects issuer-blocked launch countries", () => {
+  const config = loadConfig({
+    COMPLIANCE_POLICY_VERSION: "counsel-approved-v1",
+    COMPLIANCE_POLICY_SHA256: "ab".repeat(32),
+    COMPLIANCE_ALLOWED_COUNTRIES: "CH, ch",
+    COMPLIANCE_MINIMUM_AGE: "21",
+    GEOFENCING_CONFIGURATION_SHA256: "cd".repeat(32),
+    IDENTITY_CONFIGURATION_SHA256: "ef".repeat(32),
+    SANCTIONS_CONFIGURATION_SHA256: "12".repeat(32),
+    CUSTODY_POLICY_SHA256: "34".repeat(32),
+    CUSTODY_AUTHORITY_MODE: "hsm_multisig",
+    WITHDRAWAL_APPROVAL_QUORUM: "3",
+  });
+  assert.deepEqual(config.complianceAllowedCountries, ["CH"]);
+  assert.equal(config.compliancePolicy.minimumAge, 21);
+  assert.equal(config.withdrawalApprovalQuorum, 3);
+  assert.equal(config.custodyAuthorityMode, "hsm_multisig");
+  assert.throws(() => loadConfig({
+    COMPLIANCE_POLICY_VERSION: "counsel-approved-v1",
+    COMPLIANCE_POLICY_SHA256: "ab".repeat(32),
+    COMPLIANCE_ALLOWED_COUNTRIES: "US",
+    COMPLIANCE_MINIMUM_AGE: "21",
+  }), /issuer-blocked/);
+});

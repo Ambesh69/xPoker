@@ -73,6 +73,51 @@ async function authenticatedWallet(auth, request) {
   return session.wallet;
 }
 
+async function handleCompliance({ request, response, requestId, url, config, auth, compliance }) {
+  const cors = authCors(config, request);
+  if (!cors) {
+    sendJson(response, 403, { error: "origin_forbidden", requestId }, requestId);
+    return;
+  }
+  if (request.method === "OPTIONS") {
+    response.writeHead(204, { ...SECURITY_HEADERS, ...cors, "x-request-id": requestId });
+    response.end();
+    return;
+  }
+  if (url.pathname !== "/v1/compliance/eligibility" || request.method !== "GET") {
+    sendJson(response, 404, { error: "not_found", requestId }, requestId, cors);
+    return;
+  }
+  const wallet = await authenticatedWallet(auth, request);
+  if (!wallet) {
+    sendJson(response, 401, { error: "authentication_required", requestId }, requestId, cors);
+    return;
+  }
+  if (!compliance) {
+    sendJson(response, 503, {
+      error: "compliance_unavailable",
+      message: "Real-value eligibility is not configured",
+      eligible: false,
+      requestId,
+    }, requestId, cors);
+    return;
+  }
+  try {
+    const product = url.searchParams.get("product") ?? "real_value_poker";
+    const amountUsdMinor = url.searchParams.get("amountUsdMinor") ?? undefined;
+    const decision = await compliance.evaluateEligibility({ wallet, product, amountUsdMinor });
+    sendJson(response, 200, { decision, requestId }, requestId, cors);
+  } catch (error) {
+    const expected = Number.isInteger(error?.statusCode);
+    sendJson(response, expected ? error.statusCode : 500, {
+      error: expected ? error.code ?? "invalid_request" : "internal_error",
+      message: expected && error instanceof Error ? error.message : "Compliance evaluation failed",
+      eligible: false,
+      requestId,
+    }, requestId, cors);
+  }
+}
+
 async function handleSafeBeta({ request, response, requestId, url, config, auth, safeBeta, operations, monitoring }) {
   const cors = authCors(config, request);
   if (!cors) {
@@ -524,7 +569,7 @@ async function handleAuth({ request, response, requestId, url, config, auth }) {
   sendJson(response, 404, { error: "not_found", requestId }, requestId, cors);
 }
 
-export function createRequestHandler({ config, gates, auth, safeBeta, operations, monitoring, healthCheck }) {
+export function createRequestHandler({ config, gates, auth, safeBeta, compliance, operations, monitoring, healthCheck }) {
   return async (request, response) => {
     const startedAt = performance.now();
     const suppliedRequestId = request.headers["x-request-id"];
@@ -542,6 +587,10 @@ export function createRequestHandler({ config, gates, auth, safeBeta, operations
     });
     if (url.pathname.startsWith("/v1/auth/") && !url.search) {
       await handleAuth({ request, response, requestId, url, config, auth });
+      return;
+    }
+    if (url.pathname.startsWith("/v1/compliance/")) {
+      await handleCompliance({ request, response, requestId, url, config, auth, compliance });
       return;
     }
     if (url.pathname.startsWith("/v1/beta/")) {
@@ -617,13 +666,13 @@ export function createRequestHandler({ config, gates, auth, safeBeta, operations
   };
 }
 
-export async function createApiServer({ config = loadConfig(), manifest, runtimeAttestations, auth, safeBeta, operations, monitoring, healthCheck } = {}) {
+export async function createApiServer({ config = loadConfig(), manifest, runtimeAttestations, auth, safeBeta, compliance, operations, monitoring, healthCheck } = {}) {
   const releaseManifest = manifest ?? await loadReleaseManifest({
     path: config.releaseManifestPath,
     json: config.releaseManifestJson,
   });
   const gates = evaluateReleaseGates({ config, manifest: releaseManifest, runtimeAttestations });
-  const server = createServer(createRequestHandler({ config, gates, auth, safeBeta, operations, monitoring, healthCheck }));
+  const server = createServer(createRequestHandler({ config, gates, auth, safeBeta, compliance, operations, monitoring, healthCheck }));
   server.releaseGates = gates;
   return server;
 }
@@ -637,6 +686,7 @@ export async function startApiServer({ config = loadConfig(), runtimeFactory = c
     config,
     auth: runtime?.auth,
     safeBeta: runtime?.safeBeta,
+    compliance: runtime?.compliance,
     operations: runtime?.operations,
     monitoring: runtime?.monitoring,
     healthCheck: runtime?.health,

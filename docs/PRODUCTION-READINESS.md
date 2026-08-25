@@ -88,6 +88,17 @@ The Vercel deployment remains appropriate for static UI delivery. It is not the 
 
 This candidate is local/devnet-only. It has not been independently audited and its settlement authority remains trusted.
 
+### Compliance and custody control plane
+
+- Fail-closed identity, age, sanctions, PEP, source-of-funds, xStocks eligibility and recent-geolocation decisions are evaluated from append-only provider evidence.
+- The launch-country allowlist defaults to empty; issuer-restricted countries and regions cannot be added by configuration.
+- Self-exclusion and cooling-off block play, deposits and buy-ins while preserving otherwise lawful withdrawals; rolling deposit limits use integer USD-minor units.
+- Custody vaults pin chain, canonical Token-2022 mint, raw decimals, supported extensions and a full mint-configuration digest.
+- Deposits credit only the exact finalized vault delta, and withdrawals require distinct-operator quorum, a cooling-off interval, finalized transfer validation and balanced append-only ledger entries.
+- Reconciliation compares finalized on-chain raw units with ledger liabilities and freezes a vault on any shortfall.
+
+These controls are implemented but cannot confer legal approval. Launch countries remain empty until counsel approves the entity/jurisdiction, production providers are contracted and configured, xStocks grants the required onboarding/API access, and the signer is an audited HSM/multisig. See [`LEGAL-COMPLIANCE-DECISION-REGISTER.md`](LEGAL-COMPLIANCE-DECISION-REGISTER.md), [`XSTOCKS-CUSTODY-SETTLEMENT.md`](XSTOCKS-CUSTODY-SETTLEMENT.md), and [`INDEPENDENT-REVIEW-PACKAGE.md`](INDEPENDENT-REVIEW-PACKAGE.md).
+
 ### Release safety
 
 - `REAL_VALUE_MODE` defaults to disabled.
@@ -124,8 +135,8 @@ The following are deliberately not represented as complete:
 2. Independent audit of the Solana escrow program plus an audited multisig/attestation, dispute watcher and upgrade/governance process.
 3. Production attested-dealer wiring for the implemented encrypted hole-card transport, plus dealer key isolation/remote attestation.
 4. Production UX validation across the supported Wallet Standard desktop and mobile wallet matrix.
-5. xStocks integrator credentials and atomic RFQ integration.
-6. KYC/age, sanctions, geofencing, responsible-gaming limits, self-exclusion and jurisdiction-specific reporting.
+5. Written xStocks onboarding/approval, private integrator credentials and atomic RFQ integration.
+6. Counsel-approved launch countries plus contracted production identity/age, sanctions, geofencing, source-of-funds and xStocks-eligibility providers; the fail-closed policy and evidence model are implemented, but provider and legal approvals are not.
 7. Independent application, cryptography and contract audits; penetration testing; RNG/game certification; and legal approval for each launch jurisdiction.
 8. Peak target-traffic capacity testing, multi-region evacuation, quarterly recovery exercises, on-call ownership, DDoS protection and a public incident process. The repository's bounded 16-table soak and TCP dependency-fault baseline is necessary but not a substitute for this prelaunch work.
 

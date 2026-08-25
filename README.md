@@ -98,7 +98,7 @@ Real token ownership, purchase, escrow, and settlement remain disabled. A real-v
 4. An escrow or non-custodial game-settlement contract audited for NLH and PLO side pots, split pots, disconnects, and disputes.
 5. Production wiring for the server-authoritative candidate plus collusion controls, hand-history UX, peak-volume/multi-region exercises, and responsible-gaming limits.
 6. xStocks integrator onboarding for the atomic RFQ flow. A quote returns a ready-to-execute EVM authorization or partially signed Solana transaction; the wallet must execute it before expiry.
-7. Jurisdiction gating, age checks, KYC/AML where required, sanctions screening, gambling licensing analysis, securities/financial-promotion review, tax reporting, and geofencing. xStocks currently excludes several jurisdictions, including the U.S., U.K., Canada, and Australia.
+7. Jurisdiction gating, age checks, KYC/AML, sanctions/PEP and source-of-funds screening, responsible-gaming controls, gambling licensing analysis, securities/financial-promotion review, tax reporting, and geofencing. The issuer prohibits U.S. persons and maintains a changing prohibited/non-serviceable list; launch uses a narrower counsel-approved allowlist that is empty by default.
 
 All prices and balances in the prototype are intentionally marked as indicative/demo data.
 

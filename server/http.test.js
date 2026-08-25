@@ -7,7 +7,7 @@ import { createRequestHandler } from "./http.js";
 import { evaluateReleaseGates } from "./release-gates.js";
 import { MemoryChallengeStore, encodeBase58 } from "./wallet-auth.js";
 
-async function request(config, path, { method = "GET", body, headers = {}, auth, safeBeta, operations, monitoring } = {}) {
+async function request(config, path, { method = "GET", body, headers = {}, auth, safeBeta, compliance, operations, monitoring } = {}) {
   const response = {
     status: undefined,
     headers: undefined,
@@ -21,7 +21,7 @@ async function request(config, path, { method = "GET", body, headers = {}, auth,
     },
   };
   const gates = evaluateReleaseGates({ config });
-  const handler = createRequestHandler({ config, gates, auth, safeBeta, operations, monitoring });
+  const handler = createRequestHandler({ config, gates, auth, safeBeta, compliance, operations, monitoring });
   const payload = body === undefined ? [] : [Buffer.from(JSON.stringify(body))];
   const incoming = Readable.from(payload);
   incoming.method = method;
@@ -109,6 +109,46 @@ test("operational health is public and metrics require a constant-time bearer ch
   assert.equal(metrics.response.status, 200);
   assert.equal(metrics.response.headers["content-type"], "text/plain; version=0.0.4; charset=utf-8");
   assert.equal(metrics.body, "xpoker_uptime_seconds 42\n");
+});
+
+test("compliance eligibility is wallet-bound and fails closed when controls are unavailable", async () => {
+  const wallet = encodeBase58(Buffer.alloc(32, 17));
+  const auth = {
+    sessionStore: {
+      async authenticate(token) {
+        return token === "session-token" ? {
+          wallet,
+          expiresAt: new Date(Date.now() + 60_000).toISOString(),
+        } : undefined;
+      },
+    },
+  };
+  const headers = {
+    origin: "https://play.xpoker.example",
+    authorization: "Bearer session-token",
+  };
+  const unavailable = await request(config(false), "/v1/compliance/eligibility?product=deposit&amountUsdMinor=1000", {
+    headers,
+    auth,
+  });
+  assert.equal(unavailable.response.status, 503);
+  assert.equal(unavailable.body.eligible, false);
+
+  const compliance = {
+    async evaluateEligibility(input) {
+      assert.deepEqual(input, { wallet, product: "deposit", amountUsdMinor: "1000" });
+      return { eligible: false, reasonCodes: ["identity_missing"] };
+    },
+  };
+  const result = await request(config(false), "/v1/compliance/eligibility?product=deposit&amountUsdMinor=1000", {
+    headers,
+    auth,
+    compliance,
+  });
+  assert.equal(result.response.status, 200);
+  assert.equal(result.body.decision.eligible, false);
+  assert.deepEqual(result.body.decision.reasonCodes, ["identity_missing"]);
+  assert.equal(result.response.headers["access-control-allow-origin"], headers.origin);
 });
 
 test("wallet challenge, signed verification, and bearer logout are origin-bound", async () => {

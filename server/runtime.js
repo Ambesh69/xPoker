@@ -17,6 +17,7 @@ import { RuntimeMonitoring } from "./monitoring.js";
 import { ReadOnlyXStocksHoldings } from "./xstocks-holdings.js";
 import { createPrivyAuthenticator } from "./privy-auth.js";
 import { CURRENT_SCHEMA_MIGRATION } from "./migrate.js";
+import { PostgresComplianceService } from "./compliance/service.js";
 
 function logError(logger, event, error, context = {}) {
   logger.error(JSON.stringify({
@@ -79,6 +80,7 @@ export async function createAuthoritativeRuntime({
   let realtime;
   let operations;
   let monitoring;
+  let compliance;
   let attached = false;
   let closed = false;
 
@@ -100,6 +102,17 @@ export async function createAuthoritativeRuntime({
     });
     await operations.bootstrap();
     monitoring = new RuntimeMonitoring({ pool, redis, operations, config, logger });
+    compliance = config.compliancePolicy ? new PostgresComplianceService({
+      pool,
+      policy: config.compliancePolicy,
+      providers: {
+        identity: config.identityProvider,
+        sanctions: config.sanctionsProvider,
+        geolocation: config.geofencingProvider,
+        source_of_funds: config.sourceOfFundsProvider,
+        xstocks_eligibility: config.xstocksEligibilityProvider,
+      },
+    }) : undefined;
     const operationalLogger = {
       log: logger.log?.bind(logger) ?? (() => {}),
       warn: logger.warn?.bind(logger) ?? (() => {}),
@@ -219,6 +232,7 @@ export async function createAuthoritativeRuntime({
       auth,
       operations,
       monitoring,
+      compliance,
       safeBeta,
       safeBetaDealer,
       tableStore,
