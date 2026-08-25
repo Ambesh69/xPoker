@@ -6027,3 +6027,267 @@ a:focus-visible {
     transform: translate(91px, 4px);
   }
 }
+
+/* Investment rails: brokerage custody and self-custody stay visibly separate. */
+.investment-hero {
+  display: grid;
+  min-height: 330px;
+  align-items: center;
+  gap: 48px;
+  grid-template-columns: minmax(0, 1fr) 280px;
+  padding: 54px 0 42px;
+}
+
+.investment-hero h1 {
+  max-width: 780px;
+  margin: 18px 0 20px;
+  font-size: clamp(54px, 6.5vw, 96px);
+  font-variation-settings: "wdth" 75;
+  letter-spacing: -.075em;
+  line-height: .84;
+}
+
+.investment-hero h1 em {
+  color: var(--felt);
+  font-style: normal;
+}
+
+.investment-hero p {
+  max-width: 720px;
+  margin: 0;
+  color: var(--muted);
+  font-size: 18px;
+  font-weight: 520;
+  line-height: 1.55;
+}
+
+.ownership-seal {
+  position: relative;
+  display: grid;
+  width: 250px;
+  height: 250px;
+  place-items: center;
+  border: 1px solid var(--line-strong);
+  border-radius: 50%;
+  background: radial-gradient(circle, var(--paper) 0 48%, transparent 49%), conic-gradient(from 90deg, var(--mint), var(--paper-soft), #dceee5, var(--mint));
+  box-shadow: inset 0 0 0 18px rgba(255,255,255,.5), var(--shadow);
+  font-family: var(--mono);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: .12em;
+}
+
+.ownership-seal span:first-child { position: absolute; top: 47px; }
+.ownership-seal span:nth-of-type(2) { position: absolute; bottom: 45px; }
+.ownership-seal i { width: 1px; height: 116px; background: var(--line-strong); }
+.ownership-seal strong { position: absolute; display: grid; width: 76px; height: 76px; place-items: center; border-radius: 50%; background: var(--ink); color: var(--mint); font-size: 19px; letter-spacing: -.04em; }
+
+.rail-ledger {
+  display: grid;
+  align-items: stretch;
+  gap: 0;
+  grid-template-columns: minmax(0, 1fr) 88px minmax(0, 1fr);
+}
+
+.rail-ledger.is-loading { opacity: .68; pointer-events: none; }
+
+.ownership-rail {
+  display: flex;
+  min-width: 0;
+  min-height: 590px;
+  flex-direction: column;
+  padding: 30px;
+  border: 1px solid var(--line-strong);
+  background: rgba(255,255,255,.88);
+  box-shadow: 0 18px 42px rgba(22, 54, 37, .06);
+}
+
+.broker-rail { border-radius: 28px 8px 8px 28px; }
+.wallet-rail { border-radius: 8px 28px 28px 8px; background: linear-gradient(150deg, #f8fff2, rgba(255,255,255,.94) 55%); }
+
+.ownership-rail > header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 18px;
+}
+
+.rail-index {
+  color: var(--felt);
+  font-family: var(--mono);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: .14em;
+}
+
+.ownership-rail h2 {
+  margin: 7px 0 0;
+  font-size: 34px;
+  font-variation-settings: "wdth" 82;
+  letter-spacing: -.05em;
+}
+
+.ownership-rail > p {
+  min-height: 54px;
+  margin: 20px 0 24px;
+  color: var(--muted);
+  font-size: 15px;
+  font-weight: 520;
+  line-height: 1.5;
+}
+
+.investment-status {
+  display: inline-flex;
+  min-height: 32px;
+  align-items: center;
+  gap: 8px;
+  padding: 0 12px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  color: var(--muted);
+  background: var(--paper-soft);
+  font-family: var(--mono);
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.investment-status i { width: 7px; height: 7px; border-radius: 50%; background: #b4bdb7; }
+.investment-status.is-live { border-color: #b7d2c0; color: var(--felt); background: #f1fff3; }
+.investment-status.is-live i { background: #4fb778; box-shadow: 0 0 0 5px rgba(79,183,120,.12); }
+
+.rail-account-row {
+  display: grid;
+  margin-bottom: 22px;
+  border-block: 1px solid var(--line);
+  grid-template-columns: repeat(3, 1fr);
+}
+
+.rail-account-row span { display: grid; gap: 5px; padding: 16px 12px; border-right: 1px solid var(--line); }
+.rail-account-row span:last-child { border: 0; }
+.rail-account-row small, .broker-review small, .swap-review small { color: var(--muted); font-family: var(--mono); font-size: 9px; letter-spacing: .08em; text-transform: uppercase; }
+.rail-account-row strong { font-size: 13px; }
+
+.investment-empty {
+  display: grid;
+  min-height: 150px;
+  place-content: center;
+  gap: 7px;
+  padding: 24px;
+  border: 1px dashed var(--line-strong);
+  border-radius: 18px;
+  color: var(--muted);
+  text-align: center;
+}
+
+.investment-empty strong { color: var(--ink); font-size: 15px; }
+.investment-empty span { font-size: 13px; }
+
+.broker-position-list { display: grid; gap: 1px; overflow: hidden; border: 1px solid var(--line); border-radius: 16px; }
+.broker-position-list article { display: flex; align-items: center; justify-content: space-between; padding: 13px 16px; background: var(--paper); }
+.broker-position-list article > span { display: grid; gap: 3px; }
+.broker-position-list article > span:last-child { text-align: right; }
+.broker-position-list small { color: var(--muted); font-size: 11px; }
+.broker-position-list .gain { color: #218955; }
+.broker-position-list .loss { color: #c44e49; }
+
+.xstock-portfolio-grid { display: grid; gap: 8px; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.xstock-position { display: grid; min-width: 0; align-items: center; gap: 10px; padding: 11px; border: 1px solid var(--line); border-radius: 15px; grid-template-columns: 38px minmax(0, 1fr) auto; background: rgba(255,255,255,.7); }
+.xstock-position.is-held { border-color: #9fc7ae; box-shadow: inset 0 0 0 1px rgba(36,105,77,.06); }
+.xstock-position .asset-logo { width: 38px; height: 38px; border-radius: 12px; }
+.xstock-position > span { display: grid; min-width: 0; }
+.xstock-position small { overflow: hidden; color: var(--muted); font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
+.position-quantity { text-align: right; }
+.position-quantity strong { font-family: var(--mono); font-size: 11px; }
+
+.rail-order-form { display: grid; align-items: end; gap: 10px; margin-top: auto; padding-top: 22px; grid-template-columns: minmax(0, 1.3fr) minmax(100px, .7fr); }
+.rail-order-form > label { display: grid; gap: 7px; }
+.rail-order-form label > span { color: var(--muted); font-family: var(--mono); font-size: 9px; letter-spacing: .08em; text-transform: uppercase; }
+.rail-order-form .btn { grid-column: 1 / -1; }
+.money-field { position: relative; }
+.money-field b { position: absolute; top: 50%; left: 14px; z-index: 2; transform: translateY(-50%); }
+.money-field .input { padding-left: 29px; }
+
+.ownership-rail > footer { display: flex; min-height: 42px; align-items: flex-end; justify-content: space-between; gap: 12px; margin-top: 16px; color: var(--muted); font-size: 11px; }
+.text-action { padding: 0; color: var(--felt); background: none; font-weight: 700; text-decoration: none; cursor: pointer; }
+
+.settlement-seam { display: flex; align-items: center; justify-content: center; flex-direction: column; gap: 8px; color: #89978e; font-family: var(--mono); font-size: 8px; font-weight: 700; letter-spacing: .14em; writing-mode: vertical-rl; }
+.settlement-seam i { width: 1px; height: 165px; background: linear-gradient(transparent, var(--line-strong), transparent); }
+.settlement-seam b { display: grid; width: 30px; height: 30px; place-items: center; border: 1px solid var(--line-strong); border-radius: 50%; background: var(--canvas); color: var(--felt); font-size: 14px; writing-mode: horizontal-tb; }
+
+.swap-studio {
+  display: grid;
+  gap: 56px;
+  margin-top: 44px;
+  padding: 46px;
+  border-radius: 30px;
+  color: #eff8f2;
+  background: radial-gradient(circle at 85% 20%, rgba(215,255,134,.14), transparent 22rem), #0d2b20;
+  grid-template-columns: minmax(260px, .75fr) minmax(360px, 1.25fr);
+  box-shadow: 0 26px 70px rgba(10,42,29,.18);
+}
+
+.swap-intro h2 { margin: 16px 0 13px; font-size: clamp(38px, 4vw, 62px); font-variation-settings: "wdth" 80; letter-spacing: -.06em; line-height: .95; }
+.swap-intro p { max-width: 460px; margin: 0 0 24px; color: #aebeb5; font-size: 15px; line-height: 1.55; }
+.swap-intro .eyebrow { color: var(--mint); }
+.swap-intro .investment-status { border-color: rgba(255,255,255,.14); background: rgba(255,255,255,.05); color: #c8d4cd; }
+
+.swap-composer { display: grid; align-content: center; gap: 10px; }
+.swap-leg { padding: 18px 20px; border: 1px solid rgba(255,255,255,.13); border-radius: 18px; background: rgba(255,255,255,.07); }
+.swap-leg label { display: block; margin-bottom: 10px; color: #94a89d; font-family: var(--mono); font-size: 9px; letter-spacing: .12em; text-transform: uppercase; }
+.swap-leg > div { display: grid; grid-template-columns: minmax(0,1fr) auto; }
+.swap-leg input, .swap-leg select { min-width: 0; border: 0; outline: 0; color: #fff; background: transparent; font-size: 28px; font-weight: 700; }
+.swap-leg select { font-family: var(--mono); font-size: 14px; cursor: pointer; }
+.swap-leg select option { color: var(--ink); }
+.swap-arrow { display: grid; width: 34px; height: 34px; place-items: center; margin: -18px auto; z-index: 2; border: 1px solid #456555; border-radius: 50%; background: #112f23; color: var(--mint); }
+.swap-output { display: flex; width: 100%; align-items: center; gap: 13px; padding: 0; color: #fff; background: none; text-align: left; cursor: pointer; }
+.swap-output > .asset-logo { display: grid; width: 38px; flex: 0 0 38px; }
+.swap-output > span:not(.asset-logo) { display: grid; flex: 1; }
+.swap-output strong { font-size: 19px; }
+.swap-output small { color: #9eb0a7; }
+.swap-output b { color: var(--mint); }
+.swap-quote-button { min-height: 52px; margin-top: 4px; }
+.jupiter-fallback { color: var(--mint); font-size: 12px; font-weight: 700; text-align: center; text-decoration: none; }
+.swap-review { display: grid; align-items: center; gap: 13px; padding: 14px; border: 1px solid rgba(215,255,134,.28); border-radius: 16px; background: rgba(215,255,134,.08); grid-template-columns: 1fr auto 1fr; }
+.swap-review span { display: grid; gap: 4px; }
+.swap-review .btn { grid-column: 1 / -1; }
+
+.investment-boundary { display: flex; align-items: center; gap: 12px; margin: 18px 0 44px; padding: 16px 20px; border: 1px solid var(--line); border-radius: 16px; color: var(--muted); background: rgba(255,255,255,.65); font-size: 13px; }
+.investment-boundary strong { color: var(--ink); }
+.inline-error { display: flex; gap: 12px; margin-bottom: 18px; padding: 15px 18px; border: 1px solid #e6b7b2; border-radius: 14px; color: #7b3e38; background: #fff6f4; }
+
+.alpaca-onboarding-form { display: grid; gap: 24px; }
+.alpaca-onboarding-form fieldset { min-width: 0; padding: 18px; border: 1px solid var(--line); border-radius: 16px; }
+.alpaca-onboarding-form legend { padding: 0 8px; font-weight: 750; }
+.alpaca-onboarding-form .form-wide { grid-column: 1 / -1; }
+.onboarding-warning { display: flex; gap: 10px; padding: 14px 16px; border: 1px solid #e6ce87; border-radius: 14px; background: #fffaf0; }
+.onboarding-warning span { color: var(--muted); }
+.agreement-check { display: flex; align-items: flex-start; gap: 10px; color: var(--muted); font-size: 13px; line-height: 1.45; }
+.agreement-check input { margin-top: 3px; }
+.broker-review { display: grid; gap: 1px; overflow: hidden; border: 1px solid var(--line); border-radius: 16px; grid-template-columns: repeat(2, 1fr); }
+.broker-review span { display: grid; gap: 5px; padding: 16px; background: var(--paper-soft); }
+
+@media (max-width: 1180px) {
+  .rail-ledger { grid-template-columns: 1fr; gap: 18px; }
+  .ownership-rail { min-height: auto; border-radius: 24px; }
+  .settlement-seam { height: 46px; flex-direction: row; writing-mode: horizontal-tb; }
+  .settlement-seam i { width: 34%; height: 1px; }
+  .swap-studio { gap: 28px; padding: 34px; grid-template-columns: 1fr; }
+}
+
+@media (max-width: 760px) {
+  .investment-hero { min-height: 0; gap: 24px; grid-template-columns: 1fr; padding: 30px 0; }
+  .investment-hero h1 { font-size: clamp(48px, 15vw, 72px); }
+  .ownership-seal { display: none; }
+  .ownership-rail { padding: 22px; }
+  .ownership-rail > header { align-items: flex-start; flex-direction: column; }
+  .xstock-portfolio-grid { grid-template-columns: 1fr; }
+  .rail-order-form { grid-template-columns: 1fr; }
+  .swap-studio { margin-top: 24px; padding: 24px 18px; border-radius: 22px; }
+  .swap-review { grid-template-columns: 1fr; }
+  .swap-review > b { transform: rotate(90deg); }
+  .broker-review { grid-template-columns: 1fr; }
+  .investment-boundary { align-items: flex-start; flex-direction: column; }
+}

@@ -131,3 +131,25 @@ export async function connectAndSign(wallet, message) {
   if (!output?.signature) throw new Error("The wallet did not return a message signature.");
   return { account, signature: output.signature, signedMessage: output.signedMessage || bytes };
 }
+
+export async function signSerializedTransaction(wallet, { transaction, walletAddress } = {}) {
+  const connect = wallet?.features?.["standard:connect"]?.connect;
+  const feature = wallet?.features?.["solana:signTransaction"];
+  const signTransaction = feature?.signTransaction;
+  if (!connect || !signTransaction) throw new Error("This wallet cannot sign Solana transactions.");
+  if (!(transaction instanceof Uint8Array) || transaction.length < 32) throw new Error("The swap transaction is invalid.");
+  const connection = await connect();
+  const accounts = connection?.accounts?.length ? connection.accounts : wallet.accounts;
+  const account = accounts?.find((candidate) => (
+    candidate?.address === walletAddress
+    && candidate.chains?.some((chain) => chain === SOLANA_MAINNET_CHAIN || chain.startsWith("solana:"))
+    && candidate.features?.includes("solana:signTransaction")
+  ));
+  if (!account) throw new Error("Reconnect the same Solana account used to sign in.");
+  const outputs = await signTransaction({ account, transaction, chain: SOLANA_MAINNET_CHAIN });
+  const signedTransaction = outputs?.[0]?.signedTransaction;
+  if (!(signedTransaction instanceof Uint8Array) || signedTransaction.length < 32) {
+    throw new Error("The wallet did not return a signed transaction.");
+  }
+  return { account, signedTransaction };
+}

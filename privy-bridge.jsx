@@ -77,8 +77,14 @@ function signatureBase64(value) {
   return btoa(binary);
 }
 
+function bytesFromBase64(value) {
+  const binary = atob(value);
+  return Uint8Array.from(binary, (character) => character.charCodeAt(0));
+}
+
 function PrivyBridge() {
   const pending = useRef(null);
+  const connectedWallet = useRef(null);
   const {
     ready,
     authenticated,
@@ -123,6 +129,7 @@ function PrivyBridge() {
         throw new Error("A Solana wallet with message signing is required.");
       }
       const message = await generateSiwsMessage({ address: wallet.address });
+      connectedWallet.current = wallet;
       const signed = await wallet.provider.signMessage({
         message: new TextEncoder().encode(message),
       });
@@ -174,6 +181,19 @@ function PrivyBridge() {
           });
           openPreselectedWallet(walletId);
         });
+      },
+      async signTransaction({ address, transaction }) {
+        const wallet = connectedWallet.current;
+        if (!wallet || wallet.address !== address || !wallet.provider?.signTransaction) {
+          throw new Error("Reconnect this wallet before signing the swap.");
+        }
+        const signed = await wallet.provider.signTransaction({
+          transaction: bytesFromBase64(transaction),
+          address,
+          chain: "solana:mainnet",
+        });
+        const bytes = signed?.signedTransaction ?? signed;
+        return signatureBase64(bytes);
       },
       logout,
     });

@@ -15,7 +15,7 @@ The production frontend is bundled with `npm run build:web` so the official Priv
 
 ## Safe multiplayer beta
 
-The current client and server now provide Privy-managed Solana wallet login with server-side access-token verification, a direct Wallet Standard challenge fallback, expiring guest sessions, an optional read-only Core 10 holdings receipt, four permanent public rooms, hashed-invite private rooms, closed-beta access codes, player profiles, portable proof downloads, player reporting/moderation, an operator dashboard, idempotent table seating, replay-safe WebSocket reconnects, encrypted private cards, automatic NLH/PLO 4/ROE hands using a future verified drand round, and post-hand audit retrieval. Demo credits are isolated from the real-value ledger and have no deposit, withdrawal, escrow, settlement, or cash-out path.
+The current client and server now provide Privy-managed Solana wallet login with server-side access-token verification, a direct Wallet Standard challenge fallback, expiring guest sessions, an optional read-only Core 10 holdings receipt, separate Alpaca Broker and self-custodial Jupiter investment rails, four permanent public rooms, hashed-invite private rooms, closed-beta access codes, player profiles, portable proof downloads, player reporting/moderation, an operator dashboard, idempotent table seating, replay-safe WebSocket reconnects, encrypted private cards, automatic NLH/PLO 4/ROE hands using a future verified drand round, and post-hand audit retrieval. Brokerage shares and wallet xStocks are never converted into poker credits. Demo credits remain isolated from the real-value ledger and have no deposit, withdrawal, escrow, settlement, or cash-out path.
 
 Run the complete service with PostgreSQL and Redis after copying `.env.example`:
 
@@ -75,8 +75,9 @@ The contract checks are `npm run test:contract`, `npm run build:contract`, and `
 - Four permanent $20-minimum public tables: NLH, PLO 4, and two round-of-each tables.
 - Private room creation with NLH/PLO 4/ROE, blinds, seats, min/max buy-ins, rake and cap, action clock, time bank, host approvals, queue, straddle, run-it-twice, rabbit hunt, and anonymous seating controls.
 - Privy wallet login for Phantom, Solflare, Backpack, and a Solana-filtered WalletConnect directory.
-- xStock balance view, asset-based buy-in selection, quantity preview, and table seating.
-- One-screen xStock purchase/RFQ concept with USDC payment.
+- Read-only Core 10 xStock wallet portfolio sourced from canonical Token-2022 mints.
+- Alpaca Broker sandbox onboarding, account status, positions, and dollar-notional fractional Core 10 orders.
+- Jupiter Swap V2 order creation, same-wallet transaction signing, and execution for SOL/USDC into a Core 10 xStock.
 - Playable table UI with fold, call, and raise interactions.
 - Responsive desktop and mobile layouts, keyboard focus states, reduced-motion support, and persistent demo private rooms.
 
@@ -101,5 +102,19 @@ Real token ownership, purchase, escrow, and settlement remain disabled. A real-v
 7. Jurisdiction gating, age checks, KYC/AML, sanctions/PEP and source-of-funds screening, responsible-gaming controls, gambling licensing analysis, securities/financial-promotion review, tax reporting, and geofencing. The issuer prohibits U.S. persons and maintains a changing prohibited/non-serviceable list; launch uses a narrower counsel-approved allowlist that is empty by default.
 
 All prices and balances in the prototype are intentionally marked as indicative/demo data.
+
+## Investment rail configuration
+
+Investment endpoints are authenticated and bind every provider account or swap taker to the signed Solana wallet. Alpaca credentials and the Jupiter API key are backend-only secrets. Start with Alpaca sandbox and disabled Jupiter execution:
+
+```bash
+ALPACA_BROKER_ENVIRONMENT=sandbox
+ALPACA_BROKER_API_KEY=sealed-backend-value
+ALPACA_BROKER_API_SECRET=sealed-backend-value
+JUPITER_API_KEY=sealed-backend-value
+JUPITER_SWAPS_ENABLED=enabled
+```
+
+Alpaca receives onboarding identity data in transit and owns approval/KYC; xPoker stores only the returned provider account ID and status. Jupiter returns an unsigned, quote-bound transaction. The connected wallet signs serialized bytes locally and xPoker submits only the already-signed transaction. Provider secrets, tax IDs, identity documents, seed phrases, and private keys are never persisted by xPoker.
 
 A production table is single-mint: all seats and all pots in that table session use the same canonical xStock mint. Public “rooms” can route players into separate table shards for each eligible asset, preserving the four-room UX without creating cross-mint pots.

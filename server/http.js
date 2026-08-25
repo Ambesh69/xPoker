@@ -377,6 +377,105 @@ async function handleAdmin({ request, response, requestId, url, config, auth, op
   }
 }
 
+async function handleInvestments({ request, response, requestId, url, config, auth, investments, monitoring }) {
+  const cors = authCors(config, request);
+  if (!cors) {
+    sendJson(response, 403, { error: "origin_forbidden", requestId }, requestId);
+    return;
+  }
+  if (request.method === "OPTIONS") {
+    response.writeHead(204, { ...SECURITY_HEADERS, ...cors, "x-request-id": requestId });
+    response.end();
+    return;
+  }
+  if (!investments) {
+    sendJson(response, 503, { error: "investments_unavailable", requestId }, requestId, cors);
+    return;
+  }
+  const wallet = await authenticatedWallet(auth, request);
+  if (!wallet) {
+    sendJson(response, 401, { error: "authentication_required", requestId }, requestId, cors);
+    return;
+  }
+  try {
+    if (request.method !== "GET") {
+      const rate = await enforceAuthRateLimit({ auth, request, route: "investments-write", identity: wallet });
+      if (rate && !rate.allowed) {
+        sendJson(response, 429, { error: "rate_limited", requestId }, requestId, {
+          ...cors,
+          "retry-after": String(Math.max(1, Math.ceil(rate.retryAfterMs / 1_000))),
+        });
+        return;
+      }
+    }
+    if (url.pathname === "/v1/investments/status" && request.method === "GET") {
+      sendJson(response, 200, { ...(await investments.status(wallet)), requestId }, requestId, cors);
+      return;
+    }
+    if (url.pathname === "/v1/investments/portfolio" && request.method === "GET") {
+      sendJson(response, 200, { ...(await investments.portfolio(wallet)), requestId }, requestId, cors);
+      return;
+    }
+    if (url.pathname === "/v1/investments/alpaca/accounts" && request.method === "POST") {
+      const body = await readJson(request, config.bodyLimitBytes);
+      const forwarded = String(request.headers["x-forwarded-for"] || "").split(",")[0].trim();
+      const ipAddress = forwarded || request.socket?.remoteAddress;
+      sendJson(response, 202, {
+        ...(await investments.openSandboxAccount({ wallet, applicant: body, ipAddress })),
+        requestId,
+      }, requestId, cors);
+      return;
+    }
+    if (url.pathname === "/v1/investments/alpaca/orders" && request.method === "POST") {
+      const body = await readJson(request, config.bodyLimitBytes);
+      sendJson(response, 201, {
+        ...(await investments.buyFractional({ wallet, symbol: body.symbol, notional: body.notional })),
+        requestId,
+      }, requestId, cors);
+      return;
+    }
+    if (url.pathname === "/v1/investments/swaps/order" && request.method === "POST") {
+      const body = await readJson(request, config.bodyLimitBytes);
+      sendJson(response, 200, {
+        ...(await investments.swapOrder({
+          wallet,
+          inputSymbol: body.inputSymbol,
+          outputSymbol: body.outputSymbol,
+          amountAtomic: body.amountAtomic,
+        })),
+        requestId,
+      }, requestId, cors);
+      return;
+    }
+    if (url.pathname === "/v1/investments/swaps/execute" && request.method === "POST") {
+      const body = await readJson(request, config.bodyLimitBytes);
+      sendJson(response, 200, {
+        ...(await investments.executeSwap({
+          wallet,
+          signedTransaction: body.signedTransaction,
+          requestId: body.swapRequestId,
+        })),
+        requestId,
+      }, requestId, cors);
+      return;
+    }
+    sendJson(response, 404, { error: "not_found", requestId }, requestId, cors);
+  } catch (error) {
+    const expected = Number.isInteger(error?.statusCode);
+    const statusCode = expected ? error.statusCode : 500;
+    if (!expected) monitoring?.capture({
+      category: "investment_http_failed",
+      message: error instanceof Error ? error.message : String(error),
+      context: { requestId, method: request.method, path: url.pathname },
+    }).catch(() => {});
+    sendJson(response, statusCode, {
+      error: expected ? error.code ?? "invalid_request" : "internal_error",
+      message: expected && error instanceof Error ? error.message : "Investment request failed",
+      requestId,
+    }, requestId, cors);
+  }
+}
+
 async function readJson(request, limitBytes) {
   const contentType = String(request.headers["content-type"] ?? "").toLowerCase();
   if (!contentType.startsWith("application/json")) {
@@ -569,7 +668,7 @@ async function handleAuth({ request, response, requestId, url, config, auth }) {
   sendJson(response, 404, { error: "not_found", requestId }, requestId, cors);
 }
 
-export function createRequestHandler({ config, gates, auth, safeBeta, compliance, operations, monitoring, healthCheck }) {
+export function createRequestHandler({ config, gates, auth, safeBeta, compliance, investments, operations, monitoring, healthCheck }) {
   return async (request, response) => {
     const startedAt = performance.now();
     const suppliedRequestId = request.headers["x-request-id"];
@@ -595,6 +694,10 @@ export function createRequestHandler({ config, gates, auth, safeBeta, compliance
     }
     if (url.pathname.startsWith("/v1/beta/")) {
       await handleSafeBeta({ request, response, requestId, url, config, auth, safeBeta, operations, monitoring });
+      return;
+    }
+    if (url.pathname.startsWith("/v1/investments/")) {
+      await handleInvestments({ request, response, requestId, url, config, auth, investments, monitoring });
       return;
     }
     if (url.pathname.startsWith("/v1/admin/")) {
@@ -666,13 +769,13 @@ export function createRequestHandler({ config, gates, auth, safeBeta, compliance
   };
 }
 
-export async function createApiServer({ config = loadConfig(), manifest, runtimeAttestations, auth, safeBeta, compliance, operations, monitoring, healthCheck } = {}) {
+export async function createApiServer({ config = loadConfig(), manifest, runtimeAttestations, auth, safeBeta, compliance, investments, operations, monitoring, healthCheck } = {}) {
   const releaseManifest = manifest ?? await loadReleaseManifest({
     path: config.releaseManifestPath,
     json: config.releaseManifestJson,
   });
   const gates = evaluateReleaseGates({ config, manifest: releaseManifest, runtimeAttestations });
-  const server = createServer(createRequestHandler({ config, gates, auth, safeBeta, compliance, operations, monitoring, healthCheck }));
+  const server = createServer(createRequestHandler({ config, gates, auth, safeBeta, compliance, investments, operations, monitoring, healthCheck }));
   server.releaseGates = gates;
   return server;
 }
@@ -687,6 +790,7 @@ export async function startApiServer({ config = loadConfig(), runtimeFactory = c
     auth: runtime?.auth,
     safeBeta: runtime?.safeBeta,
     compliance: runtime?.compliance,
+    investments: runtime?.investments,
     operations: runtime?.operations,
     monitoring: runtime?.monitoring,
     healthCheck: runtime?.health,

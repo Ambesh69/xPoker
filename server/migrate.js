@@ -5,7 +5,7 @@ import { loadConfig } from "./config.js";
 import { createPostgresPool } from "./postgres-hand-store.js";
 
 const MIGRATION_NAME = /^\d{3}_[a-z0-9_]+\.sql$/;
-export const CURRENT_SCHEMA_MIGRATION = "008_compliance_custody.sql";
+export const CURRENT_SCHEMA_MIGRATION = "009_investment_rails.sql";
 
 function migrationBody(source, name) {
   const withoutBegin = source.replace(/^\s*BEGIN;\s*/i, "");

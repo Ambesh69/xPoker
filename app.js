@@ -1,4 +1,4 @@
-import { compatibleWallets, connectAndSign, createWalletRegistry, legacyWallets } from "./wallet-standard.js";
+import { compatibleWallets, connectAndSign, createWalletRegistry, legacyWallets, signSerializedTransaction } from "./wallet-standard.js";
 
 const ASSET_STYLE = {
   AAPLx: ["AA", "#dfe5e0", "+0.8%"], NVDAx: ["NV", "#c9f6a5", "+2.4%"],
@@ -8,12 +8,20 @@ const ASSET_STYLE = {
   SPYx: ["SP", "#d7ff86", "+0.6%"], QQQx: ["QQ", "#ddd5ff", "+0.9%"],
 };
 
+const XSTOCK_MINTS = Object.freeze({
+  AAPLx: "XsbEhLAtcf6HdfpFZ5xEMdqW8nfAvcsP5bdudRLJzJp", NVDAx: "Xsc9qvGR1efVDFGLrVsmkzv3qi45LTBjeUKSPmx9qEh",
+  MSFTx: "XspzcW1PRtgf6Wj92HCiZdjzKCyFekVD8P5Ueh3dRMX", AMZNx: "Xs3eBt7uRfJX8QUs4suhyU8p2M6DoUDrJyWBa8LLZsg",
+  GOOGLx: "XsCPL9dNWBMvFtTmwcCA5v3xWPSMEBCszbQdiLLq6aN", METAx: "Xsa62P5mvPszXL1krVUnU5ar38bBSVcWAB6fmPCo5Zu",
+  TSLAx: "XsDoVfqeBukxuZHWhdvWHBhgEHjGNst4MLodqsJHzoB", NFLXx: "XsEH7wWfJJu2ZT3UCFeVfALnVA6CP5ur7Ee11KmzVpL",
+  SPYx: "XsoCS1TfEyfFhfvj8EtZ528L3CaKBDBRqRapnBbDF2W", QQQx: "Xs8S1uUs1zvS2p7iwtsG3b6fkhpvmwz4GYU3gWAmWHZ",
+});
+
 const FALLBACK_ASSETS = [
   ["AAPLx", "Apple", 231.42], ["NVDAx", "NVIDIA", 182.19], ["MSFTx", "Microsoft", 516.73],
   ["AMZNx", "Amazon", 218.64], ["GOOGLx", "Alphabet", 201.88], ["METAx", "Meta", 742.06],
   ["TSLAx", "Tesla", 338.11], ["NFLXx", "Netflix", 1194.7], ["SPYx", "S&P 500 ETF", 648.23],
   ["QQQx", "Nasdaq 100 ETF", 576.91],
-].map(([symbol, name, indicativePrice]) => ({ symbol, name, indicativePrice }));
+].map(([symbol, name, indicativePrice]) => ({ symbol, name, indicativePrice, mint: XSTOCK_MINTS[symbol] }));
 
 const PUBLIC_IDS = [
   "10000000-0000-4000-8000-000000000001", "10000000-0000-4000-8000-000000000002",
@@ -79,6 +87,8 @@ const state = {
   wallets: [], pendingAccessInvite: "", sessionMeta: storedJson(sessionStorage, SESSION_META_KEY), sessionRecovery: null,
   walletEntryMode: "wallet", privyReady: Boolean(window.xPokerPrivy?.ready), privyBusy: false,
   holdings: { status: "idle", data: null, error: null }, networkOnline: navigator.onLine,
+  investments: { status: "idle", provider: null, portfolio: null, error: null },
+  swapInput: "SOL", swapAmount: "0.1", swapOrder: null,
   reconnectNextAt: null, reconnectReason: null, lastConnectedAt: null, proofDownload: null,
 };
 
@@ -113,6 +123,8 @@ function clearLocalSession(reason = null) {
   state.sessionMeta = null;
   state.sessionRecovery = reason;
   state.holdings = { status: "idle", data: null, error: null };
+  state.investments = { status: "idle", provider: null, portfolio: null, error: null };
+  state.swapOrder = null;
 }
 
 function storeSession(result, walletName, wallet) {
@@ -148,8 +160,8 @@ async function loadLobby({ quiet = false } = {}) {
 }
 
 function navItem(icon, label, action, active = false) { return `<button class="nav-item ${active ? "active" : ""}" data-action="${action}"><span class="nav-icon">${icon}</span><span>${label}</span></button>`; }
-function sidebar() { const authenticated = Boolean(state.profile); return `<aside class="sidebar"><a class="brand" href="#" data-action="go-lobby" aria-label="xPoker home"><span class="brand-mark">xP</span><span class="brand-word">xPoker</span></a><div class="nav-label">Game floor</div><nav class="nav-list" aria-label="Primary navigation">${navItem("⌁", "Tables", "go-lobby", state.view === "lobby")}${navItem("＋", "Host room", "open-host")}${navItem("#", "Join room", "open-invite")}${authenticated ? navItem("◎", "Player profile", "show-profile", state.view === "profile") : ""}${authenticated ? navItem("≋", "Hand history", "show-history", state.view === "history") : ""}</nav>${state.profile?.operatorRole ? `<div class="nav-label">Operations</div><nav class="nav-list" aria-label="Operations navigation">${navItem("⌗", "Pit board", "show-operations", state.view === "operations")}</nav>` : ""}<div class="sidebar-card"><div class="mini-row"><span class="utility-label">Runtime</span><span class="status-pill"><i class="market-dot"></i>${state.backend === "online" ? "Authoritative" : "Preview"}</span></div><strong>Proof before the pot.</strong><p>Table actions are versioned and replayable. Beta credits cannot be deposited, withdrawn, or settled onchain.</p></div></aside>`; }
-function topbar() { const wallet = state.profile?.wallet; const labels = { lobby: "Safe multiplayer beta", profile: "Player profile", history: "Hand history", operations: "Pit board" }; return `<header class="topbar"><div class="crumbs"><span>${state.view === "operations" ? "Operations" : "Game floor"}</span><span>／</span><strong>${labels[state.view] || "Safe multiplayer beta"}</strong></div><div class="top-actions"><span class="quote-status"><i class="market-dot"></i>${state.backend === "online" ? "Live beta · demo credits" : "Interface preview · no server"}</span><button class="btn btn-ghost btn-small" data-action="open-buy">Get xStocks</button><button class="btn ${wallet ? "" : "btn-primary"} wallet-btn" data-action="open-wallet">${wallet ? `<span class="wallet-avatar avatar-${escapeHtml(state.profile.avatarStyle || "felt")}">${state.profile.isGuest ? "D" : "W"}</span>${escapeHtml(shortWallet(wallet))}` : "Connect / enter beta"}</button></div></header>`; }
+function sidebar() { const authenticated = Boolean(state.profile); return `<aside class="sidebar"><a class="brand" href="#" data-action="go-lobby" aria-label="xPoker home"><span class="brand-mark">xP</span><span class="brand-word">xPoker</span></a><div class="nav-label">Game floor</div><nav class="nav-list" aria-label="Primary navigation">${navItem("⌁", "Tables", "go-lobby", state.view === "lobby")}${navItem("＋", "Host room", "open-host")}${navItem("#", "Join room", "open-invite")}${authenticated && !state.profile.isGuest ? navItem("↗", "Investments", "show-investments", state.view === "investments") : ""}${authenticated ? navItem("◎", "Player profile", "show-profile", state.view === "profile") : ""}${authenticated ? navItem("≋", "Hand history", "show-history", state.view === "history") : ""}</nav>${state.profile?.operatorRole ? `<div class="nav-label">Operations</div><nav class="nav-list" aria-label="Operations navigation">${navItem("⌗", "Pit board", "show-operations", state.view === "operations")}</nav>` : ""}<div class="sidebar-card"><div class="mini-row"><span class="utility-label">Runtime</span><span class="status-pill"><i class="market-dot"></i>${state.backend === "online" ? "Authoritative" : "Preview"}</span></div><strong>Proof before the pot.</strong><p>Table actions are versioned and replayable. Investments never become poker credits.</p></div></aside>`; }
+function topbar() { const wallet = state.profile?.wallet; const labels = { lobby: "Safe multiplayer beta", investments: "Investment rails", profile: "Player profile", history: "Hand history", operations: "Pit board" }; return `<header class="topbar"><div class="crumbs"><span>${state.view === "operations" ? "Operations" : state.view === "investments" ? "Ownership" : "Game floor"}</span><span>／</span><strong>${labels[state.view] || "Safe multiplayer beta"}</strong></div><div class="top-actions"><span class="quote-status"><i class="market-dot"></i>${state.backend === "online" ? "Live beta · demo credits" : "Interface preview · no server"}</span><button class="btn btn-ghost btn-small" data-action="show-investments">Buy / swap stocks</button><button class="btn ${wallet ? "" : "btn-primary"} wallet-btn" data-action="open-wallet">${wallet ? `<span class="wallet-avatar avatar-${escapeHtml(state.profile.avatarStyle || "felt")}">${state.profile.isGuest ? "D" : "W"}</span>${escapeHtml(shortWallet(wallet))}` : "Connect / enter beta"}</button></div></header>`; }
 
 function marketRail() { return `<section class="market-rail" aria-label="Eligible table denominations"><div class="rail-intro"><strong>Core 10</strong><span>Demo denominations</span></div><div class="asset-strip">${state.assets.map((asset) => { const item = assetDetails(asset); return `<button class="asset-quote" data-action="asset-info" data-symbol="${item.symbol}" aria-label="View ${escapeHtml(item.name)}">${assetLogo(item)}<span class="asset-meta"><strong>${item.symbol}</strong><small>${item.move}</small></span></button>`; }).join("")}</div></section>`; }
 function roomCard(room, index) { const limits = roomLimits(room); const accents = ["#d7ff86", "#ccecff", "#ddd5ff", "#ffc7c5"]; const seats = room.rules.seats; return `<article class="room-card" style="--room-accent:${accents[index % accents.length]}" data-action="open-buyin" data-room="${room.id}" tabindex="0" aria-label="Join ${escapeHtml(room.name)}"><div class="room-top"><span class="game-pill">${gameLabel(room.game)}</span><span class="status-pill"><i class="market-dot"></i>${state.backend === "online" ? "Live" : "Preview"}</span></div><h3>${escapeHtml(room.name)}</h3><span class="blinds">${money(limits.small)} / ${money(limits.big)} · ${seats} max</span><div class="room-stats"><div class="room-stat"><span>Demo buy-in</span><strong>${money(limits.min)}–${money(limits.max)}</strong></div><div class="room-stat"><span>Rake model</span><strong>${(Number(room.rules.rakeBps) / 100).toFixed(1)}%</strong></div></div><div class="room-footer"><div class="avatar-stack">${Array.from({ length: Math.min(Number(room.seatsTaken || 0), 4) }, (_, seat) => `<span class="avatar" style="--avatar-color:${accents[(seat + index + 1) % accents.length]}">${["LM", "AK", "RZ", "JS"][seat]}</span>`).join("")}</div><span class="seat-count">${Number(room.seatsTaken || 0)}/${seats} seated →</span></div></article>`; }
@@ -181,6 +193,41 @@ function handHistoryView() {
       ? `<div class="panel-empty roomy history-error-empty"><strong>We could not load your hands.</strong><span>Retry the archive; do not play another hand to replace these records.</span><button class="btn" data-action="refresh-history">Retry archive</button></div>`
       : `<div class="panel-empty roomy"><strong>No hands on tape yet.</strong><span>Finish a safe-beta hand and its signed record will appear here.</span><button class="btn btn-accent" data-action="go-lobby">Find a table</button></div>`;
   return pageShell(`<section class="subpage-hero compact-hero"><div><span class="eyebrow">Signed hand archive</span><h1>Your hand <em>tape.</em></h1><p>Completed hands retain their external randomness round, committed deck root, outcome, and portable reconstruction proof.</p></div><button class="btn" data-action="refresh-history">Refresh history</button></section><section class="paper-panel history-panel"><div class="proof-guide"><span class="proof-guide-mark">JSON</span><div><strong>Every completed hand has a portable proof.</strong><small>Verify it in xPoker, or download the complete bundle for independent retention.</small></div><span>Deck root · drand · seeds · reveals · transcript</span></div>${loadError}<div class="history-head"><span>Hand</span><span>Game</span><span>Result</span><span>Proof</span></div>${content}</section>`);
+}
+
+function investmentRailStatus(active, activeLabel, inactiveLabel) {
+  return `<span class="investment-status ${active ? "is-live" : ""}"><i></i>${escapeHtml(active ? activeLabel : inactiveLabel)}</span>`;
+}
+
+function walletXStocksGrid(walletHoldings) {
+  const holdings = walletHoldings?.holdings || state.holdings.data?.holdings || [];
+  if (!holdings.length) return `<div class="investment-empty"><strong>Connect the wallet to scan the Core 10.</strong><span>The scan is read-only and requests no token permissions.</span></div>`;
+  return `<div class="xstock-portfolio-grid">${holdings.map((holding) => {
+    const asset = state.assets.find((item) => item.symbol === holding.symbol) || holding;
+    return `<article class="xstock-position ${holding.detected ? "is-held" : ""}">${assetLogo(asset)}<span><strong>${escapeHtml(holding.symbol)}</strong><small>${escapeHtml(holding.name)}</small></span><span class="position-quantity"><strong>${holding.detected ? escapeHtml(holding.displayAmount ?? "Exact balance") : "—"}</strong><small>${holding.detected ? "wallet units" : "not held"}</small></span></article>`;
+  }).join("")}</div>`;
+}
+
+function brokeragePositions(portfolio) {
+  const positions = portfolio?.brokerage?.positions || [];
+  if (!positions.length) return `<div class="investment-empty"><strong>No brokerage positions yet.</strong><span>Dollar-denominated fractional orders appear here after Alpaca accepts them.</span></div>`;
+  return `<div class="broker-position-list">${positions.map((position) => `<article><span><strong>${escapeHtml(position.symbol)}</strong><small>${escapeHtml(position.qty || "0")} shares</small></span><span><strong>${money(Number(position.market_value || 0))}</strong><small class="${Number(position.unrealized_pl || 0) >= 0 ? "gain" : "loss"}">${Number(position.unrealized_pl || 0) >= 0 ? "+" : ""}${money(Number(position.unrealized_pl || 0))}</small></span></article>`).join("")}</div>`;
+}
+
+function investmentsView() {
+  const provider = state.investments.provider;
+  const portfolio = state.investments.portfolio;
+  const brokerage = provider?.brokerage;
+  const swaps = provider?.swaps;
+  const account = brokerage?.account;
+  const activeAccount = ["ACTIVE", "APPROVED"].includes(String(account?.status || "").toUpperCase());
+  const selected = state.selectedAsset || state.assets[0];
+  const heldCount = (portfolio?.walletHoldings?.holdings || []).filter((holding) => holding.detected).length;
+  const swapOutput = state.swapOrder?.output?.symbol;
+  const swapReview = state.swapOrder ? `<div class="swap-review"><span><small>You send</small><strong>${escapeHtml(state.swapAmount)} ${escapeHtml(state.swapInput)}</strong></span><b>→</b><span><small>Destination</small><strong>${escapeHtml(swapOutput || selected.symbol)} · exact amount in wallet</strong></span><button class="btn btn-accent" data-action="sign-swap">Review in wallet</button></div>` : "";
+  const loading = state.investments.status === "loading";
+  const error = state.investments.error ? `<div class="inline-error"><strong>Investment rails unavailable</strong><span>${escapeHtml(state.investments.error)}</span></div>` : "";
+  return pageShell(`<section class="investment-hero"><div><span class="eyebrow">One portfolio · two ownership rails</span><h1>Own the stock.<br><em>Choose the rail.</em></h1><p>Buy fractional shares in an Alpaca brokerage account, or hold tokenized xStocks in your Solana wallet. Neither balance can be used as poker credit.</p></div><div class="ownership-seal"><span>ALPACA</span><i></i><span>SOLANA</span><strong>YOU</strong></div></section>${error}<section class="rail-ledger ${loading ? "is-loading" : ""}"><article class="ownership-rail broker-rail"><header><div><span class="rail-index">01 / BROKERAGE</span><h2>Fractional shares</h2></div>${investmentRailStatus(Boolean(brokerage?.configured), brokerage?.environment === "production" ? "Alpaca live" : "Alpaca sandbox", "Setup required")}</header><p>Dollar-denominated market orders. Alpaca reviews the account, performs KYC, and custodies the brokerage assets.</p><div class="rail-account-row"><span><small>Account</small><strong>${account ? escapeHtml(account.status) : "Not opened"}</strong></span><span><small>Order format</small><strong>USD notional</strong></span><span><small>Poker link</small><strong>None</strong></span></div>${brokeragePositions(portfolio)}<form class="rail-order-form" id="alpaca-order-form"><label><span>Stock</span><select class="select" name="symbol">${state.assets.map((asset) => `<option value="${asset.symbol.replace(/x$/, "")}" ${asset.symbol === selected.symbol ? "selected" : ""}>${escapeHtml(asset.symbol.replace(/x$/, ""))} · ${escapeHtml(asset.name)}</option>`).join("")}</select></label><label><span>Dollars</span><div class="money-field"><b>$</b><input class="input" name="notional" type="number" min="1" max="25000" step="0.01" value="25.00" /></div></label><button class="btn btn-primary" type="button" data-action="alpaca-buy" ${activeAccount ? "" : "disabled"}>Review fractional buy</button></form><footer>${account ? `<span>Alpaca review status updates on refresh.</span>` : brokerage?.configured ? `<button class="text-action" data-action="open-alpaca-onboarding">Open secure sandbox onboarding →</button>` : `<a class="text-action" href="https://alpaca.markets/broker" target="_blank" rel="noopener noreferrer">Connect an Alpaca Broker account →</a>`}</footer></article><div class="settlement-seam"><span>OFFCHAIN</span><i></i><b>≠</b><i></i><span>ONCHAIN</span></div><article class="ownership-rail wallet-rail"><header><div><span class="rail-index">02 / SELF-CUSTODY</span><h2>Wallet xStocks</h2></div>${investmentRailStatus(Boolean(state.profile && !state.profile.isGuest), `${heldCount} detected`, "Wallet required")}</header><p>Core 10 Token-2022 balances read directly from Solana mainnet. Only your wallet can authorize a swap.</p>${walletXStocksGrid(portfolio?.walletHoldings)}<footer><span>${escapeHtml(shortWallet(state.profile?.wallet))} · read-only scan</span><button class="text-action" data-action="refresh-investments">Refresh balances ↻</button></footer></article></section><section class="swap-studio"><div class="swap-intro"><span class="eyebrow">Wallet-to-wallet exchange</span><h2>Swap into an xStock.</h2><p>Jupiter creates a quote-bound transaction. Your wallet shows and signs it; xPoker cannot alter it or move assets later.</p>${investmentRailStatus(Boolean(swaps?.enabled), "Jupiter ready", "Direct swap setup pending")}</div><div class="swap-composer"><div class="swap-leg"><label>You pay</label><div><input id="swap-amount" inputmode="decimal" value="${escapeHtml(state.swapAmount)}" aria-label="Swap amount"/><select id="swap-input" aria-label="Input asset">${(swaps?.supportedInputs || [{ symbol: "SOL" }, { symbol: "USDC" }]).map((asset) => `<option value="${asset.symbol}" ${state.swapInput === asset.symbol ? "selected" : ""}>${asset.symbol}</option>`).join("")}</select></div></div><span class="swap-arrow">↓</span><div class="swap-leg receive"><label>You receive</label><button class="swap-output" data-action="cycle-swap-output">${assetLogo(selected)}<span><strong>${escapeHtml(selected.symbol)}</strong><small>${escapeHtml(selected.name)}</small></span><b>⌄</b></button></div><button class="btn btn-accent swap-quote-button" data-action="quote-swap" ${swaps?.enabled ? "" : "disabled"}>Get firm route</button>${swaps?.enabled ? "" : `<a class="jupiter-fallback" href="https://jup.ag/swap/SOL-${encodeURIComponent(selected.mint || "")}" target="_blank" rel="noopener noreferrer">Swap externally on Jupiter ↗</a>`}${swapReview}</div></section><div class="investment-boundary"><strong>Separate by design.</strong><span>Brokerage shares and wallet xStocks can be bought or held here. The poker floor continues to use free, non-transferable demo credits only.</span></div>`);
 }
 
 function pulseRail(operations) { const summary = operations?.summary || {}; const instances = operations?.instances || []; const monitor = operations?.monitoring; const healthy = monitor?.status === "healthy"; const headline = !healthy ? "Operational attention required" : instances.length >= 2 ? "Monitored and redundant" : instances.length ? "Monitored on one instance" : "Awaiting heartbeat"; return `<section class="pulse-rail ${healthy ? "" : "pulse-alert"}"><div class="pulse-lead"><span class="pulse-mark"></span><div><span class="utility-label">Table pulse</span><strong>${headline}</strong></div></div><div class="pulse-segment"><small>API instances</small><strong>${instances.length}</strong></div><div class="pulse-segment"><small>Active tables</small><strong>${summary.activeTables || 0}</strong></div><div class="pulse-segment"><small>Error rate</small><strong>${((summary.errorRate || 0) * 100).toFixed(2)}%</strong></div><div class="pulse-instances">${instances.map((instance) => `<span title="${escapeHtml(instance.instanceId)}"><i></i>${escapeHtml(String(instance.buildCommit).slice(0, 7))}</span>`).join("") || "No heartbeat"}</div></section>`; }
@@ -409,7 +456,153 @@ function inviteCreatedModal(room, code) { openModal(modalShell({ eyebrow: "Room 
 function inviteModal() { if (!state.profile) { walletModal("invite"); return; } openModal(modalShell({ eyebrow: "Private membership", title: "Join with an invite", description: "Room invitations are matched by digest and never appear in the public lobby.", body: `<div class="invite-path"><span><i>1</i><strong>Enter the room code</strong><small>Format ABCD-2345</small></span><span><i>2</i><strong>Membership is added</strong><small>Bound to ${escapeHtml(shortWallet(state.profile.wallet))}</small></span><span><i>3</i><strong>Choose a demo seat</strong><small>No token approval</small></span></div><label class="field"><span class="field-label">Private room code</span><input class="input invite-input" id="invite-input" maxlength="9" placeholder="ABCD-2345" autocomplete="off" /></label>`, footer: `<span class="balance-note">Demo rooms only · code stored as a digest</span><button class="btn btn-primary" data-action="join-code">Join room</button>` })); }
 async function joinInvite() { const button = document.querySelector('[data-action="join-code"]'); const code = document.querySelector("#invite-input").value; button.disabled = true; try { const result = await api("/v1/beta/rooms/join", { method: "POST", authenticated: true, body: { inviteCode: code } }); closeModal(); await loadLobby({ quiet: true }); toast(`Joined ${result.room.name}.`); } catch (error) { button.disabled = false; toast(error.message); } }
 
-function buyStocksModal(asset = state.selectedAsset) { state.selectedAsset = asset; openModal(modalShell({ eyebrow: "Real asset boundary", title: `Get ${escapeHtml(asset.symbol)}`, description: "Real xStock purchase is intentionally outside the safe multiplayer beta.", body: `<div class="purchase-layout"><div><div class="field"><span class="field-label">Launch asset</span>${assetPicker(asset.symbol)}</div><div class="safety-box"><strong>Why this is paused</strong><span>A production in-app purchase needs xStocks integrator access, live quotes, jurisdiction screening, and a wallet-executed transaction. The beta does not fake any of those steps.</span></div></div><aside class="order-card"><span class="utility-label" style="color:#aebbb4">Current mode</span><div class="order-total">No quote</div><span class="quote-timer">Safe beta · transfers disabled</span><div class="order-row" style="margin-top:20px"><span>Wallet spend</span><strong>Disabled</strong></div><div class="order-row"><span>Table credits</span><strong>Simulated</strong></div><a class="btn btn-accent external-btn" href="https://xstocks.fi/" target="_blank" rel="noopener noreferrer">Visit xStocks ↗</a></aside></div>` })); }
+function buyStocksModal(asset = state.selectedAsset) { if (asset) state.selectedAsset = asset; showInvestments(); }
+
+function alpacaOnboardingModal() {
+  openModal(modalShell({
+    wide: true,
+    eyebrow: "Alpaca sandbox onboarding",
+    title: "Open a paper brokerage account",
+    description: "Identity fields are sent directly to Alpaca over the server connection and are not stored in xPoker's database. Use sandbox test data only.",
+    body: `<form id="alpaca-onboarding-form" class="alpaca-onboarding-form"><div class="onboarding-warning"><strong>Sandbox only</strong><span>Do not enter a real SSN or live identity data until the approved production Broker environment is configured.</span></div><fieldset><legend>Identity</legend><div class="form-grid"><label class="field"><span class="field-label">First name</span><input class="input" name="givenName" required autocomplete="given-name" /></label><label class="field"><span class="field-label">Last name</span><input class="input" name="familyName" required autocomplete="family-name" /></label><label class="field"><span class="field-label">Date of birth</span><input class="input" name="dateOfBirth" type="date" required /></label><label class="field"><span class="field-label">Sandbox tax ID</span><input class="input" name="taxId" type="password" required autocomplete="off" /></label></div></fieldset><fieldset><legend>Contact</legend><div class="form-grid"><label class="field"><span class="field-label">Email</span><input class="input" name="emailAddress" type="email" required autocomplete="email" /></label><label class="field"><span class="field-label">Phone</span><input class="input" name="phoneNumber" required autocomplete="tel" /></label><label class="field form-wide"><span class="field-label">Street address</span><input class="input" name="streetAddress" required autocomplete="street-address" /></label><label class="field"><span class="field-label">City</span><input class="input" name="city" required autocomplete="address-level2" /></label><label class="field"><span class="field-label">State</span><input class="input" name="state" required autocomplete="address-level1" /></label><label class="field"><span class="field-label">Postal code</span><input class="input" name="postalCode" required autocomplete="postal-code" /></label></div></fieldset><label class="agreement-check"><input type="checkbox" name="agreementsAccepted" required /><span>I confirm this is sandbox test data and accept Alpaca's account, customer, and margin agreements for this test application.</span></label></form>`,
+    footer: `<span class="balance-note">Alpaca makes the approval decision</span><button class="btn btn-primary" data-action="submit-alpaca-onboarding">Submit to Alpaca sandbox</button>`,
+  }));
+}
+
+async function showInvestments() {
+  state.view = "investments";
+  render();
+  if (!state.profile || state.profile.isGuest) return;
+  await loadInvestments();
+}
+
+async function loadInvestments() {
+  if (!state.profile || state.profile.isGuest || !state.token || state.backend !== "online") return;
+  state.investments = { ...state.investments, status: "loading", error: null };
+  render();
+  const [provider, portfolio] = await Promise.allSettled([
+    api("/v1/investments/status", { authenticated: true }),
+    api("/v1/investments/portfolio", { authenticated: true }),
+  ]);
+  state.investments = {
+    status: provider.status === "fulfilled" ? "ready" : "error",
+    provider: provider.status === "fulfilled" ? provider.value : state.investments.provider,
+    portfolio: portfolio.status === "fulfilled" ? portfolio.value : state.investments.portfolio,
+    error: provider.status === "rejected" ? provider.reason.message : portfolio.status === "rejected" ? portfolio.reason.message : null,
+  };
+  if (portfolio.status === "fulfilled") state.holdings = { status: "ready", data: portfolio.value.walletHoldings, error: null };
+  render();
+}
+
+async function submitAlpacaOnboarding() {
+  const form = document.querySelector("#alpaca-onboarding-form");
+  if (!form?.reportValidity()) return;
+  const value = Object.fromEntries(new FormData(form));
+  const applicant = {
+    contact: {
+      emailAddress: value.emailAddress, phoneNumber: value.phoneNumber, streetAddress: value.streetAddress,
+      city: value.city, state: value.state, postalCode: value.postalCode, country: "USA",
+    },
+    identity: {
+      givenName: value.givenName, familyName: value.familyName, dateOfBirth: value.dateOfBirth,
+      taxId: value.taxId, taxIdType: "USA_SSN", countryOfCitizenship: "USA", countryOfBirth: "USA",
+      countryOfTaxResidence: "USA", fundingSource: ["employment_income"],
+    },
+    disclosures: {},
+    agreementsAccepted: true,
+  };
+  const button = document.querySelector('[data-action="submit-alpaca-onboarding"]');
+  button.disabled = true; button.textContent = "Sending securely…";
+  try {
+    const result = await api("/v1/investments/alpaca/accounts", { method: "POST", authenticated: true, body: applicant });
+    closeModal();
+    await loadInvestments();
+    toast(`Alpaca account submitted: ${result.account.status}.`);
+  } catch (error) {
+    button.disabled = false; button.textContent = "Submit to Alpaca sandbox"; toast(error.message);
+  }
+}
+
+function reviewAlpacaBuy() {
+  const form = document.querySelector("#alpaca-order-form");
+  if (!form?.reportValidity()) return;
+  const input = Object.fromEntries(new FormData(form));
+  openModal(modalShell({
+    eyebrow: "Fractional market order",
+    title: `Buy $${escapeHtml(Number(input.notional).toFixed(2))} of ${escapeHtml(input.symbol)}`,
+    description: "The order is sent to the Alpaca brokerage account bound to this wallet. It does not purchase xStocks or affect a poker balance.",
+    body: `<div class="broker-review"><span><small>Side</small><strong>Buy</strong></span><span><small>Type</small><strong>Market · day</strong></span><span><small>Notional</small><strong>$${escapeHtml(Number(input.notional).toFixed(2))}</strong></span><span><small>Custodian</small><strong>Alpaca</strong></span></div>`,
+    footer: `<button class="btn" data-action="close-modal">Cancel</button><button class="btn btn-primary" data-action="confirm-alpaca-buy" data-symbol="${escapeHtml(input.symbol)}" data-notional="${escapeHtml(input.notional)}">Submit order</button>`,
+  }));
+}
+
+async function confirmAlpacaBuy(button) {
+  button.disabled = true; button.textContent = "Submitting…";
+  try {
+    const result = await api("/v1/investments/alpaca/orders", { method: "POST", authenticated: true, body: { symbol: button.dataset.symbol, notional: button.dataset.notional } });
+    closeModal(); await loadInvestments(); toast(`Alpaca order ${result.order.status || "submitted"}.`);
+  } catch (error) { button.disabled = false; button.textContent = "Submit order"; toast(error.message); }
+}
+
+function decimalToAtomic(value, decimals) {
+  const normalized = String(value || "").trim();
+  if (!/^(?:0|[1-9][0-9]*)(?:\.[0-9]+)?$/.test(normalized)) throw new Error("Enter a valid swap amount.");
+  const [whole, fraction = ""] = normalized.split(".");
+  if (fraction.length > decimals) throw new Error(`Use at most ${decimals} decimal places.`);
+  const atomic = BigInt(whole) * (10n ** BigInt(decimals)) + BigInt((fraction + "0".repeat(decimals)).slice(0, decimals) || "0");
+  if (atomic <= 0n) throw new Error("Swap amount must be greater than zero.");
+  return String(atomic);
+}
+
+async function quoteSwap() {
+  const input = document.querySelector("#swap-input")?.value || state.swapInput;
+  const amount = document.querySelector("#swap-amount")?.value || state.swapAmount;
+  state.swapInput = input; state.swapAmount = amount; state.swapOrder = null;
+  const button = document.querySelector('[data-action="quote-swap"]');
+  button.disabled = true; button.textContent = "Routing…";
+  try {
+    const decimals = input === "USDC" ? 6 : 9;
+    state.swapOrder = await api("/v1/investments/swaps/order", { method: "POST", authenticated: true, body: {
+      inputSymbol: input, outputSymbol: state.selectedAsset.symbol, amountAtomic: decimalToAtomic(amount, decimals),
+    } });
+    render();
+  } catch (error) { button.disabled = false; button.textContent = "Get firm route"; toast(error.message); }
+}
+
+function base64ToBytes(value) { const binary = atob(value); return Uint8Array.from(binary, (character) => character.charCodeAt(0)); }
+function bytesToBase64(value) { let binary = ""; for (const byte of value) binary += String.fromCharCode(byte); return btoa(binary); }
+
+async function signSwap() {
+  if (!state.swapOrder?.transaction) return;
+  const button = document.querySelector('[data-action="sign-swap"]');
+  button.disabled = true; button.textContent = "Open wallet…";
+  try {
+    let signedTransaction;
+    try {
+      signedTransaction = await window.xPokerPrivy?.signTransaction?.({
+        address: state.profile.wallet,
+        transaction: state.swapOrder.transaction,
+      });
+    } catch {}
+    if (!signedTransaction) {
+      const preferredName = state.sessionMeta?.walletName || localStorage.getItem(LAST_WALLET_KEY) || "";
+      const wallet = state.wallets.find((item) => preferredName.toLowerCase().includes(item.name.toLowerCase()))
+        || state.wallets.find((item) => item.features?.["solana:signTransaction"]);
+      if (!wallet) throw new Error("Reconnect a transaction-capable Solana wallet to continue.");
+      const signed = await signSerializedTransaction(wallet, {
+        transaction: base64ToBytes(state.swapOrder.transaction),
+        walletAddress: state.profile.wallet,
+      });
+      signedTransaction = bytesToBase64(signed.signedTransaction);
+    }
+    const result = await api("/v1/investments/swaps/execute", { method: "POST", authenticated: true, body: {
+      signedTransaction, swapRequestId: state.swapOrder.requestId,
+    } });
+    state.swapOrder = null;
+    await loadInvestments();
+    toast(result.signature ? `Swap submitted: ${result.signature.slice(0, 8)}…` : "Swap submitted to Solana.");
+  } catch (error) { button.disabled = false; button.textContent = "Review in wallet"; toast(error.message); }
+}
 
 async function takeSeat() {
   if (!state.profile) { closeModal(); walletModal("buyin"); return; }
@@ -682,7 +875,7 @@ async function downloadAudit(handId) {
   }
 }
 
-function render() { const views = { lobby: lobbyView, profile: profileView, history: handHistoryView, operations: operationsView }; document.querySelector("#app").innerHTML = state.loading ? `<div class="app-loading"><span class="brand-mark">xP</span><strong>Opening the safe floor…</strong></div>` : state.view === "table" ? tableView() : (views[state.view] || lobbyView)(); bindEvents(); }
+function render() { const views = { lobby: lobbyView, investments: investmentsView, profile: profileView, history: handHistoryView, operations: operationsView }; document.querySelector("#app").innerHTML = state.loading ? `<div class="app-loading"><span class="brand-mark">xP</span><strong>Opening the safe floor…</strong></div>` : state.view === "table" ? tableView() : (views[state.view] || lobbyView)(); bindEvents(); }
 function requestId(prefix = "web") { return `${prefix}:${crypto.randomUUID()}`; }
 function sendRealtime(message) { if (state.socket?.readyState !== WebSocket.OPEN) { toast("Realtime connection is not ready yet."); return false; } state.socket.send(JSON.stringify(message)); return true; }
 function wsOrigin() { return API_ORIGIN.replace(/^http/, "ws"); }
@@ -862,6 +1055,7 @@ function handleAction(event) {
   if (action === "close-modal") { if (!target.classList.contains("modal-overlay") || event.target === target) closeModal(); }
   if (action === "go-lobby") { event.preventDefault(); state.socket?.close(1000, "left table view"); state.view = "lobby"; closeModal(); loadLobby({ quiet: true }); }
   if (action === "show-profile") showProfile(); if (action === "show-history" || action === "refresh-history") loadHandHistory(); if (action === "show-operations" || action === "refresh-operations") loadOperations();
+  if (action === "show-investments" || action === "open-buy") showInvestments(); if (action === "refresh-investments") loadInvestments();
   if (action === "leave-table") { event.preventDefault(); leaveTable(); }
   if (action === "open-wallet") walletModal(); if (action === "connect-privy-wallet") connectPrivy(target); if (action === "connect-provider") connectProvider(target); if (action === "guest-session") createGuestSession(); if (action === "preview-session") createPreviewSession(); if (action === "logout") logout();
   if (action === "show-guest-login") { state.walletEntryMode = "guest"; walletModal(); } if (action === "show-wallet-login") { state.walletEntryMode = "wallet"; walletModal(); }
@@ -870,7 +1064,11 @@ function handleAction(event) {
   if (action === "open-host") hostModal(); if (action === "open-invite") inviteModal(); if (action === "join-code") joinInvite();
   if (action === "save-profile") saveProfile(); if (action === "redeem-beta-invite") redeemBetaInvite();
   if (action === "focus-bankroll") document.querySelector("#bankroll")?.scrollIntoView({ behavior: "smooth", block: "center" });
-  if (action === "open-buy") buyStocksModal(); if (action === "asset-info") buyStocksModal(state.assets.find((asset) => asset.symbol === target.dataset.symbol));
+  if (action === "asset-info") buyStocksModal(state.assets.find((asset) => asset.symbol === target.dataset.symbol));
+  if (action === "open-alpaca-onboarding") alpacaOnboardingModal(); if (action === "submit-alpaca-onboarding") submitAlpacaOnboarding();
+  if (action === "alpaca-buy") reviewAlpacaBuy(); if (action === "confirm-alpaca-buy") confirmAlpacaBuy(target);
+  if (action === "quote-swap") quoteSwap(); if (action === "sign-swap") signSwap();
+  if (action === "cycle-swap-output") { const index = state.assets.findIndex((asset) => asset.symbol === state.selectedAsset.symbol); state.selectedAsset = state.assets[(index + 1) % state.assets.length]; state.swapOrder = null; render(); }
   if (action === "open-buyin") buyinModal(state.rooms.find((room) => room.id === target.dataset.room)); if (action === "quick-seat") buyinModal(state.rooms.find((room) => room.visibility === "public" && Number(room.seatsTaken) < room.rules.seats) || state.rooms[0]);
   if (action === "select-asset") { state.selectedAsset = state.assets.find((asset) => asset.symbol === target.dataset.symbol); if (document.querySelector("#buyin-range")) buyinModal(state.selectedRoom); else buyStocksModal(state.selectedAsset); }
   if (action === "set-buyin") { state.buyInAmount = Number(target.dataset.value); document.querySelector("#buyin-range").value = state.buyInAmount; document.querySelector("#buyin-dollar").textContent = money(state.buyInAmount); }

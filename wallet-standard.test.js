@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { compatibleWallets, connectAndSign, createWalletRegistry, wrapLegacyProvider } from "./wallet-standard.js";
+import { compatibleWallets, connectAndSign, createWalletRegistry, signSerializedTransaction, wrapLegacyProvider } from "./wallet-standard.js";
 
 class FakeWindow extends EventTarget {}
 
@@ -57,4 +57,20 @@ test("legacy provider wrapper exposes the same connect and sign-message surface"
   const result = await connectAndSign(wallet, "hello");
   assert.equal(result.account.address, "legacy-wallet");
   assert.deepEqual([...result.signature], [9, 8, 7]);
+});
+
+test("standard transaction signing is account-bound and returns serialized bytes", async () => {
+  const account = { address: "wallet-address", chains: ["solana:mainnet"], features: ["solana:signMessage", "solana:signTransaction"] };
+  const wallet = standardWallet();
+  wallet.features["standard:connect"].connect = async () => ({ accounts: [account] });
+  wallet.features["solana:signTransaction"] = {
+    signTransaction: async ({ transaction, chain }) => {
+      assert.equal(chain, "solana:mainnet");
+      return [{ signedTransaction: Uint8Array.from([...transaction, 9]) }];
+    },
+  };
+  const result = await signSerializedTransaction(wallet, { transaction: new Uint8Array(40), walletAddress: "wallet-address" });
+  assert.equal(result.account.address, "wallet-address");
+  assert.equal(result.signedTransaction.at(-1), 9);
+  await assert.rejects(() => signSerializedTransaction(wallet, { transaction: new Uint8Array(40), walletAddress: "other" }), /same Solana account/);
 });

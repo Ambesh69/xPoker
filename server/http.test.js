@@ -7,7 +7,7 @@ import { createRequestHandler } from "./http.js";
 import { evaluateReleaseGates } from "./release-gates.js";
 import { MemoryChallengeStore, encodeBase58 } from "./wallet-auth.js";
 
-async function request(config, path, { method = "GET", body, headers = {}, auth, safeBeta, compliance, operations, monitoring } = {}) {
+async function request(config, path, { method = "GET", body, headers = {}, auth, safeBeta, compliance, investments, operations, monitoring } = {}) {
   const response = {
     status: undefined,
     headers: undefined,
@@ -21,7 +21,7 @@ async function request(config, path, { method = "GET", body, headers = {}, auth,
     },
   };
   const gates = evaluateReleaseGates({ config });
-  const handler = createRequestHandler({ config, gates, auth, safeBeta, compliance, operations, monitoring });
+  const handler = createRequestHandler({ config, gates, auth, safeBeta, compliance, investments, operations, monitoring });
   const payload = body === undefined ? [] : [Buffer.from(JSON.stringify(body))];
   const incoming = Readable.from(payload);
   incoming.method = method;
@@ -374,6 +374,29 @@ test("authenticated wallet holdings are read-only and bound to the session walle
   assert.equal(result.body.fundsMove, false);
   assert.deepEqual(result.body.permissionsRequested, []);
   assert.deepEqual(calls, [{ wallet }]);
+});
+
+test("investment routes bind brokerage and swap operations to the signed wallet", async () => {
+  const wallet = encodeBase58(Buffer.alloc(32, 15));
+  const calls = [];
+  const investments = {
+    status: async (inputWallet) => { calls.push(["status", inputWallet]); return { brokerage: { provider: "alpaca" }, swaps: { provider: "jupiter" } }; },
+    swapOrder: async (input) => { calls.push(["swap", input]); return { requestId: "swap_request_123", transaction: "A".repeat(128) }; },
+  };
+  const headers = { origin: "https://play.xpoker.example", authorization: "Bearer investment-session" };
+  const auth = { sessionStore: { authenticate: async () => ({ wallet, expiresAt: "2099-01-01T00:00:00.000Z" }) } };
+  const status = await request(config(false), "/v1/investments/status", { headers, auth, investments });
+  assert.equal(status.response.status, 200);
+  assert.equal(status.body.brokerage.provider, "alpaca");
+  const order = await request(config(false), "/v1/investments/swaps/order", {
+    method: "POST", headers, auth, investments,
+    body: { inputSymbol: "SOL", outputSymbol: "AAPLx", amountAtomic: "100000000" },
+  });
+  assert.equal(order.response.status, 200);
+  assert.deepEqual(calls, [
+    ["status", wallet],
+    ["swap", { wallet, inputSymbol: "SOL", outputSymbol: "AAPLx", amountAtomic: "100000000" }],
+  ]);
 });
 
 test("operator routes require a session and keep one-time invite codes out of listings", async () => {

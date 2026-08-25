@@ -18,6 +18,9 @@ import { ReadOnlyXStocksHoldings } from "./xstocks-holdings.js";
 import { createPrivyAuthenticator } from "./privy-auth.js";
 import { CURRENT_SCHEMA_MIGRATION } from "./migrate.js";
 import { PostgresComplianceService } from "./compliance/service.js";
+import { AlpacaBrokerClient } from "./investments/alpaca-broker.js";
+import { JupiterSwapClient } from "./investments/jupiter-swap.js";
+import { PostgresInvestmentService } from "./investments/service.js";
 
 function logError(logger, event, error, context = {}) {
   logger.error(JSON.stringify({
@@ -81,6 +84,7 @@ export async function createAuthoritativeRuntime({
   let operations;
   let monitoring;
   let compliance;
+  let investments;
   let attached = false;
   let closed = false;
 
@@ -170,10 +174,25 @@ export async function createAuthoritativeRuntime({
     const unsubscribeSafeBetaDealer = safeBetaDealer
       ? tableCoordinator.subscribe(safeBetaDealer.onTableEvent)
       : undefined;
-    const holdingsReader = config.safeBetaMode ? new ReadOnlyXStocksHoldings({
+    const holdingsReader = new ReadOnlyXStocksHoldings({
       rpcUrl: config.solanaReadRpcUrl,
       apiBase: config.xstocksApiBase,
-    }) : undefined;
+    });
+    investments = new PostgresInvestmentService({
+      pool,
+      holdingsReader,
+      alpaca: new AlpacaBrokerClient({
+        baseUrl: config.alpacaBrokerApiBase,
+        apiKey: config.alpacaBrokerApiKey,
+        apiSecret: config.alpacaBrokerApiSecret,
+        environment: config.alpacaBrokerEnvironment,
+      }),
+      jupiter: new JupiterSwapClient({
+        baseUrl: config.jupiterApiBase,
+        apiKey: config.jupiterApiKey,
+        enabled: config.jupiterSwapsEnabled,
+      }),
+    });
     const safeBeta = config.safeBetaMode ? new SafeBetaService({
       pool,
       sessionStore: auth.sessionStore,
@@ -233,6 +252,7 @@ export async function createAuthoritativeRuntime({
       operations,
       monitoring,
       compliance,
+      investments,
       safeBeta,
       safeBetaDealer,
       tableStore,

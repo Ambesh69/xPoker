@@ -27,6 +27,7 @@ test("Postgres hand store atomically persists an idempotent signed transcript", 
     "006_dealer_signing_keys.sql",
     "007_hand_history_indexes.sql",
     "008_compliance_custody.sql",
+    "009_investment_rails.sql",
   ];
   assert.equal(migrationResult.current, migrations.at(-1));
   assert.equal(migrationResult.applied.every((name) => migrations.includes(name)), true);
